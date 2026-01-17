@@ -1,0 +1,1 @@
+# SLAT - Secure Local Attendance Terminal
