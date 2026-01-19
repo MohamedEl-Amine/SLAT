@@ -496,13 +496,85 @@ class PublicInterface(QWidget):
             self.show_method_selection()
     
     def show_face_scanner(self):
-        """Show face recognition (placeholder for now)."""
+        """Show face recognition for attendance."""
         self.current_method = "FACE"
-        QMessageBox.information(self, "Reconnaissance faciale", 
-                               "La numérisation par reconnaissance faciale sera implémentée.\n\n"
-                               "Pour l'instant, les employés peuvent saisir leur ID manuellement.",
+        from utils.face_recognition import FaceRecognition
+        
+        face_rec = FaceRecognition()
+        
+        # Test camera availability
+        if not face_rec.test_camera():
+            QMessageBox.critical(self, "Erreur de caméra", 
+                               "❌ Aucune caméra détectée.\n\n"
+                               "Veuillez vous assurer qu'une caméra est connectée et réessayez.",
                                QMessageBox.Ok)
-        self.show_id_input()
+            self.show_method_selection()
+            return
+        
+        # Show instructions
+        QMessageBox.information(self, "Reconnaissance faciale", 
+                               "👤 Reconnaissance faciale\n\n"
+                               "Positionnez votre visage face à la caméra.\n"
+                               "Le système vous identifiera automatiquement.\n\n"
+                               "Appuyez sur ESPACE pour confirmer l'identification\n"
+                               "Appuyez sur Q pour annuler",
+                               QMessageBox.Ok)
+        
+        # Capture face for recognition
+        result = face_rec.capture_face_for_recognition()
+        
+        if result is None or result[0] is None:
+            QMessageBox.warning(self, "Scan annulé", 
+                               "⚠ La reconnaissance faciale a été annulée.\n\n"
+                               "Veuillez réessayer ou utiliser une autre méthode.",
+                               QMessageBox.Ok)
+            self.show_method_selection()
+            return
+        
+        captured_face, raw_frame = result
+        
+        # Get all employees with face profiles
+        all_employees = self.db.get_all_employees()
+        employees_with_faces = [emp for emp in all_employees if emp.face_image and emp.enabled]
+        
+        if not employees_with_faces:
+            QMessageBox.warning(self, "Aucun profil facial", 
+                               "⚠ Aucun employé n'a de profil facial enregistré.\n\n"
+                               "Veuillez contacter l'administrateur ou utiliser une autre méthode.",
+                               QMessageBox.Ok)
+            self.show_method_selection()
+            return
+        
+        # Match against all employee faces
+        best_match = None
+        best_confidence = 0.0
+        
+        for emp in employees_with_faces:
+            try:
+                confidence = face_rec.match_face(emp.face_image, captured_face)
+                if confidence > best_confidence:
+                    best_confidence = confidence
+                    best_match = emp
+            except Exception as e:
+                print(f"Error matching face for employee {emp.employee_id}: {e}")
+                continue
+        
+        # Check if match meets threshold
+        threshold = face_rec.get_acceptance_threshold()
+        
+        if best_match is None or not face_rec.is_match_accepted(best_confidence):
+            # Recognition failed
+            QMessageBox.critical(self, "Non reconnu", 
+                                f"✗ Identification échouée\n\n"
+                                f"Confiance : {best_confidence:.1f}%\n"
+                                f"Seuil requis : {threshold:.1f}%\n\n"
+                                f"Veuillez réessayer ou utiliser une autre méthode d'identification.",
+                                QMessageBox.Ok)
+            self.show_method_selection()
+            return
+        
+        # Recognition successful - process attendance
+        self.process_face_attendance(best_match.employee_id, best_confidence)
 
     def update_datetime(self):
         """Update the current date and time display."""
@@ -684,6 +756,99 @@ class PublicInterface(QWidget):
             print(f"Error in process_attendance: {traceback.format_exc()}")
             QMessageBox.critical(self, "Erreur", f"✗ {error_msg}", QMessageBox.Ok)
             self.reset_interface()
+
+    def process_face_attendance(self, employee_id: str, confidence: float):
+        """Process attendance for face recognition."""
+        try:
+            # Get employee
+            emp = self.db.get_employee(employee_id)
+            if not emp:
+                QMessageBox.critical(self, "Erreur", "Employé introuvable dans le système.")
+                self.show_method_selection()
+                return
+            
+            if not emp.enabled:
+                QMessageBox.critical(self, "Compte désactivé", 
+                                    "✗ Votre compte a été désactivé.\n\n"
+                                    "Veuillez contacter l'administrateur.",
+                                    QMessageBox.Ok)
+                self.show_method_selection()
+                return
+
+            # Check for recent attendance (prevent duplicate within same window)
+            recent_logs = self.db.get_employee_logs(employee_id)
+            if recent_logs:
+                last_log = recent_logs[0]
+                last_timestamp = last_log.timestamp
+                last_action = last_log.action
+                last_time_str = last_timestamp.strftime("%H:%M")
+                time_diff = datetime.datetime.now() - last_timestamp
+                
+                if time_diff.total_seconds() < 300:  # 5 minutes
+                    QMessageBox.warning(self, "Doublon détecté", 
+                                       f"⚠ Vous avez déjà pointé {last_action} à {last_time_str}.\n\n"
+                                       "Veuillez attendre au moins 5 minutes avant de pointer à nouveau.",
+                                       QMessageBox.Ok)
+                    self.show_method_selection()
+                    return
+
+            # Determine attendance window and action
+            now = datetime.datetime.now()
+            current_time = now.time()
+            current_str = now.strftime("%H:%M")
+            
+            morning_start_str = self.db.get_setting('morning_start')
+            morning_end_str = self.db.get_setting('morning_end')
+            afternoon_start_str = self.db.get_setting('afternoon_start')
+            afternoon_end_str = self.db.get_setting('afternoon_end')
+
+            morning_start = datetime.datetime.strptime(morning_start_str, '%H:%M').time()
+            morning_end = datetime.datetime.strptime(morning_end_str, '%H:%M').time()
+            afternoon_start = datetime.datetime.strptime(afternoon_start_str, '%H:%M').time()
+            afternoon_end = datetime.datetime.strptime(afternoon_end_str, '%H:%M').time()
+
+            action = None
+            window_name = ""
+            if morning_start <= current_time <= morning_end:
+                action = "IN"
+                window_name = "ARRIVÉE"
+            elif afternoon_start <= current_time <= afternoon_end:
+                action = "OUT"
+                window_name = "DÉPART"
+            else:
+                if current_time < morning_start:
+                    next_window = f"L'arrivée du matin ouvre à {morning_start_str}"
+                elif current_time < afternoon_start:
+                    next_window = f"Le départ de l'après-midi ouvre à {afternoon_start_str}"
+                else:
+                    next_window = f"Prochaine arrivée demain à {morning_start_str}"
+                
+                QMessageBox.warning(self, "Hors fenêtre", 
+                                   f"⚠ Présence non autorisée à cette heure.\n\n{next_window}",
+                                   QMessageBox.Ok)
+                self.show_method_selection()
+                return
+
+            # Record attendance with face recognition method
+            device_id = socket.gethostname()
+            self.db.record_attendance(employee_id, action, 'face', device_id)
+            
+            # Show success message with confidence
+            QMessageBox.information(self, "Succès", 
+                                   f"✓ {window_name} RÉUSSIE\n\n"
+                                   f"👤 {emp.name}\n"
+                                   f"🕐 Heure: {current_str}\n"
+                                   f"📊 Confiance: {confidence:.1f}%\n"
+                                   f"🔍 Méthode: Reconnaissance faciale",
+                                   QMessageBox.Ok)
+            self.show_method_selection()
+            
+        except Exception as e:
+            import traceback
+            error_msg = f"Erreur système:\n{str(e)}"
+            print(f"Error in process_face_attendance: {traceback.format_exc()}")
+            QMessageBox.critical(self, "Erreur", f"✗ {error_msg}", QMessageBox.Ok)
+            self.show_method_selection()
 
     def reset_interface(self):
         """Reset the interface to initial state."""

@@ -202,24 +202,65 @@ class EmployeeProfileDialog(QDialog):
             QMessageBox.information(self, "Succès", f"Code QR enregistré dans {filename}")
     
     def set_face(self):
-        filename, _ = QFileDialog.getOpenFileName(
-            self,
-            "Sélectionner l'image faciale",
-            "",
-            "Image Files (*.png *.jpg *.jpeg)"
-        )
+        """Capture and set face image for employee using camera."""
+        from utils.face_recognition import FaceRecognition
         
-        if filename:
-            try:
-                with open(filename, 'rb') as f:
-                    face_data = f.read()
-                self.db.update_employee_face(self.employee_id, face_data)
-                QMessageBox.information(self, "Succès", "Image faciale définie avec succès.")
-                self.employee = self.db.get_employee(self.employee_id)  # Refresh data
-                self.face_status.setText("Défini")
-                self.face_status.setStyleSheet("color: green;")
-            except Exception as e:
-                QMessageBox.critical(self, "Erreur", f"Échec de définition de l'image faciale : {str(e)}")
+        face_rec = FaceRecognition()
+        
+        # Test camera availability
+        if not face_rec.test_camera():
+            QMessageBox.critical(self, "Erreur", "Aucune caméra détectée.\n\nVeuillez vous assurer qu'une caméra est connectée.")
+            return
+        
+        # Show instructions
+        QMessageBox.information(self, "Enregistrement facial", 
+                               "📷 Enregistrement facial\n\n"
+                               "Instructions :\n"
+                               "1. Positionnez votre visage face à la caméra\n"
+                               "2. Assurez-vous d'être seul dans le cadre\n"
+                               "3. Regardez directement la caméra\n"
+                               "4. Appuyez sur ESPACE quand le cadre devient vert\n"
+                               "5. Appuyez sur Q pour annuler\n\n"
+                               "Note : L'ancien profil facial sera remplacé.",
+                               QMessageBox.Ok)
+        
+        # Capture face with quality validation
+        result = face_rec.capture_face_for_enrollment()
+        
+        if result is None:
+            QMessageBox.warning(self, "Erreur", "Échec de la capture faciale.")
+            return
+            
+        face_data, message = result
+        
+        if face_data is None:
+            QMessageBox.warning(self, "Capture annulée", f"La capture faciale a été annulée.\n\n{message}")
+            return
+        
+        try:
+            # Convert numpy array to bytes for storage
+            face_bytes = face_data.tobytes()
+            
+            # Store in database
+            old_face_existed = self.employee.face_image is not None
+            self.db.update_employee_face(self.employee_id, face_bytes)
+            
+            # Log the action
+            action_type = "redéfini" if old_face_existed else "défini"
+            print(f"Face {action_type} for employee {self.employee_id} - {self.employee.name}")
+            
+            # Refresh employee data
+            self.employee = self.db.get_employee(self.employee_id)
+            self.face_status.setText("Défini")
+            self.face_status.setStyleSheet("color: green;")
+            
+            QMessageBox.information(self, "Succès", 
+                                   f"✓ Visage {action_type} avec succès\n\n"
+                                   f"Employé : {self.employee.name}\n"
+                                   f"Le profil biométrique a été enregistré.")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Échec de l'enregistrement du visage : {str(e)}")
     
     def save_changes(self):
         new_name = self.name_edit.text().strip()
@@ -472,23 +513,51 @@ class AdminInterface(QWidget):
             QMessageBox.critical(self, "Erreur", f"Échec de génération du code QR : {str(e)}")
     
     def set_face(self, employee_id):
-        """Set face image for employee"""
-        filename, _ = QFileDialog.getOpenFileName(
-            self,
-            "Sélectionner l'image faciale",
-            "",
-            "Image Files (*.png *.jpg *.jpeg)"
-        )
+        """Set face image for employee using camera"""
+        from utils.face_recognition import FaceRecognition
         
-        if filename:
-            try:
-                with open(filename, 'rb') as f:
-                    face_data = f.read()
-                self.db.update_employee_face(employee_id, face_data)
-                QMessageBox.information(self, "Succès", f"Image faciale définie pour {employee_id}")
-                self.load_employees()
-            except Exception as e:
-                QMessageBox.critical(self, "Erreur", f"Échec de définition de l'image faciale : {str(e)}")
+        face_rec = FaceRecognition()
+        
+        # Get employee info
+        emp = self.db.get_employee(employee_id)
+        if not emp:
+            QMessageBox.critical(self, "Erreur", "Employé introuvable.")
+            return
+        
+        # Test camera
+        if not face_rec.test_camera():
+            QMessageBox.critical(self, "Erreur", "Aucune caméra détectée.")
+            return
+        
+        # Show instructions
+        QMessageBox.information(self, "Enregistrement facial", 
+                               f"📷 Enregistrement facial pour {emp.name}\n\n"
+                               "Instructions :\n"
+                               "1. Positionnez-vous face à la caméra\n"
+                               "2. Appuyez sur ESPACE pour capturer\n"
+                               "3. Appuyez sur Q pour annuler",
+                               QMessageBox.Ok)
+        
+        # Capture face
+        result = face_rec.capture_face_for_enrollment()
+        
+        if result is None:
+            QMessageBox.warning(self, "Erreur", "Échec de la capture faciale.")
+            return
+            
+        face_data, message = result
+        
+        if face_data is None:
+            QMessageBox.warning(self, "Capture annulée", f"Capture annulée.\n\n{message}")
+            return
+        
+        try:
+            face_bytes = face_data.tobytes()
+            self.db.update_employee_face(employee_id, face_bytes)
+            QMessageBox.information(self, "Succès", f"Image faciale définie pour {emp.name}")
+            self.load_employees()
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Échec de définition de l'image faciale : {str(e)}")
 
     def toggle_employee(self, employee_id, new_status):
         """Enable or disable an employee"""
