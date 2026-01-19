@@ -178,6 +178,24 @@ class PublicInterface(QWidget):
         self.id_container.hide()
         self.main_layout.addWidget(self.id_container)
         
+        # Method switcher button (for enabled methods)
+        self.method_switcher = QPushButton("⟳ Changer de méthode (TAB)")
+        self.method_switcher.setFont(QFont("Arial", 14))
+        self.method_switcher.setStyleSheet("""
+            QPushButton {
+                background-color: #95A5A6;
+                color: white;
+                border-radius: 8px;
+                padding: 10px 20px;
+                min-width: 250px;
+            }
+            QPushButton:hover {
+                background-color: #7F8C8D;
+            }
+        """)
+        self.method_switcher.clicked.connect(self.switch_to_next_method)
+        self.main_layout.addWidget(self.method_switcher, 0, Qt.AlignCenter)
+        
         self.layout.addWidget(self.main_container)
 
     def setup_status_area(self):
@@ -238,12 +256,67 @@ class PublicInterface(QWidget):
         """Start the terminal in the configured mode"""
         mode = self.db.get_setting('attendance_mode')
         
+        # Update method switcher visibility based on enabled methods
+        enabled_methods = self.get_enabled_methods()
+        if len(enabled_methods) > 1:
+            self.method_switcher.show()
+        else:
+            self.method_switcher.hide()
+        
         if mode == 'qr':
             self.start_qr_mode()
         elif mode == 'face':
             self.start_face_mode()
         else:  # card
             self.start_card_mode()
+
+    def get_enabled_methods(self):
+        """Get list of enabled methods"""
+        enabled = []
+        if self.db.get_setting('qr_enabled') == '1':
+            enabled.append('qr')
+        if self.db.get_setting('face_enabled') == '1':
+            enabled.append('face')
+        if self.db.get_setting('card_enabled') == '1':
+            enabled.append('card')
+        return enabled
+
+    def switch_to_next_method(self):
+        """Switch to the next enabled method"""
+        enabled_methods = self.get_enabled_methods()
+        
+        if len(enabled_methods) <= 1:
+            return  # No other methods to switch to
+        
+        current_mode = self.db.get_setting('attendance_mode')
+        
+        try:
+            current_index = enabled_methods.index(current_mode)
+            next_index = (current_index + 1) % len(enabled_methods)
+            next_mode = enabled_methods[next_index]
+        except ValueError:
+            # Current mode not in enabled list, start with first enabled
+            next_mode = enabled_methods[0]
+        
+        # Stop current mode
+        self.stop_current_mode()
+        
+        # Update setting and start new mode
+        self.db.update_setting('attendance_mode', next_mode)
+        self.start_attendance_mode()
+        
+        # Show notification
+        mode_names = {'qr': 'Scan QR', 'face': 'Reconnaissance Faciale', 'card': 'Carte ID'}
+        self.show_status(f"✓ Mode changé: {mode_names.get(next_mode, next_mode)}", "info", auto_clear=True)
+
+    def stop_current_mode(self):
+        """Stop camera and timers for current mode"""
+        if self.camera:
+            self.camera.release()
+            self.camera = None
+        if self.camera_timer.isActive():
+            self.camera_timer.stop()
+        self.clear_status()
 
     def start_qr_mode(self):
         """Start QR scanning mode"""
@@ -612,6 +685,10 @@ class PublicInterface(QWidget):
                 self.hide()
                 self.f11_press_count = 0
                 self.f11_reset_timer.stop()
+        elif event.key() == Qt.Key_Tab:
+            # Switch to next enabled method
+            self.switch_to_next_method()
+            event.accept()
         elif event.key() == Qt.Key_Escape:
             pass  # Ignore escape
 
