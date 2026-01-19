@@ -117,16 +117,25 @@ class PublicInterface(QWidget):
 
     def setup_main_area(self):
         """Setup main area for camera or ID input"""
+        # Horizontal split layout
         self.main_container = QWidget()
-        self.main_layout = QVBoxLayout()
+        self.main_layout = QHBoxLayout()
         self.main_container.setLayout(self.main_layout)
+        
+        # Left side: Camera/Input area
+        self.left_container = QWidget()
+        self.left_layout = QVBoxLayout()
+        self.left_container.setLayout(self.left_layout)
         
         # Mode indicator
         self.mode_label = QLabel()
         self.mode_label.setFont(QFont("Arial", 18, QFont.Bold))
         self.mode_label.setAlignment(Qt.AlignCenter)
         self.mode_label.setStyleSheet("color: #3498DB; padding: 10px;")
-        self.main_layout.addWidget(self.mode_label)
+        self.left_layout.addWidget(self.mode_label)
+        
+        # Add spacer
+        self.left_layout.addItem(QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Expanding))
         
         # Camera display label
         self.camera_label = QLabel()
@@ -141,7 +150,7 @@ class PublicInterface(QWidget):
             }
         """)
         self.camera_label.hide()
-        self.main_layout.addWidget(self.camera_label, 0, Qt.AlignCenter)
+        self.left_layout.addWidget(self.camera_label, 0, Qt.AlignCenter)
         
         # ID input area (for card mode)
         self.id_container = QWidget()
@@ -176,7 +185,7 @@ class PublicInterface(QWidget):
         self.id_layout.addWidget(self.id_input, 0, Qt.AlignCenter)
         
         self.id_container.hide()
-        self.main_layout.addWidget(self.id_container)
+        self.left_layout.addWidget(self.id_container, 0, Qt.AlignCenter)
         
         # Method switcher button (for enabled methods)
         self.method_switcher = QPushButton("⟳ Changer de méthode (TAB)")
@@ -194,24 +203,34 @@ class PublicInterface(QWidget):
             }
         """)
         self.method_switcher.clicked.connect(self.switch_to_next_method)
-        self.main_layout.addWidget(self.method_switcher, 0, Qt.AlignCenter)
+        self.left_layout.addWidget(self.method_switcher, 0, Qt.AlignCenter)
+        
+        # Add spacer
+        self.left_layout.addItem(QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Expanding))
+        
+        self.main_layout.addWidget(self.left_container)
         
         self.layout.addWidget(self.main_container)
 
     def setup_status_area(self):
         """Setup status feedback area"""
+        # Right side: Status/Response area
         self.status_container = QWidget()
         self.status_layout = QVBoxLayout()
         self.status_container.setLayout(self.status_layout)
+        self.status_container.setMinimumWidth(400)
         
-        # Employee photo
+        # Add top spacer
+        self.status_layout.addItem(QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Expanding))
+        
+        # Employee photo (larger for side display)
         self.employee_photo = QLabel()
         self.employee_photo.setAlignment(Qt.AlignCenter)
-        self.employee_photo.setFixedSize(120, 120)
+        self.employee_photo.setFixedSize(200, 200)
         self.employee_photo.setStyleSheet("""
             QLabel {
-                border: 2px solid #BDC3C7;
-                border-radius: 60px;
+                border: 3px solid #BDC3C7;
+                border-radius: 100px;
                 background-color: white;
             }
         """)
@@ -220,27 +239,32 @@ class PublicInterface(QWidget):
         
         # Employee name
         self.employee_name_label = QLabel()
-        self.employee_name_label.setFont(QFont("Arial", 20, QFont.Bold))
+        self.employee_name_label.setFont(QFont("Arial", 28, QFont.Bold))
         self.employee_name_label.setAlignment(Qt.AlignCenter)
-        self.employee_name_label.setStyleSheet("color: #2C3E50; padding: 5px;")
+        self.employee_name_label.setStyleSheet("color: #2C3E50; padding: 15px;")
         self.employee_name_label.hide()
+        self.employee_name_label.setWordWrap(True)
         self.status_layout.addWidget(self.employee_name_label)
         
         # Status message
         self.status_label = QLabel()
-        self.status_label.setFont(QFont("Arial", 18, QFont.Bold))
+        self.status_label.setFont(QFont("Arial", 22, QFont.Bold))
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setWordWrap(True)
-        self.status_label.setMinimumHeight(80)
+        self.status_label.setMinimumHeight(150)
         self.status_label.setStyleSheet("""
             QLabel {
-                padding: 15px;
+                padding: 20px;
                 border-radius: 10px;
             }
         """)
         self.status_layout.addWidget(self.status_label)
         
-        self.layout.addWidget(self.status_container)
+        # Add bottom spacer
+        self.status_layout.addItem(QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Expanding))
+        
+        # Add to main horizontal layout
+        self.main_layout.addWidget(self.status_container)
 
     def setup_footer(self):
         """Setup footer"""
@@ -584,7 +608,7 @@ class PublicInterface(QWidget):
             bytes_per_line = 3 * w
             qt_image = QImage(face_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(qt_image)
-            scaled_pixmap = pixmap.scaled(120, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            scaled_pixmap = pixmap.scaled(200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.employee_photo.setPixmap(scaled_pixmap)
             self.employee_photo.show()
         else:
