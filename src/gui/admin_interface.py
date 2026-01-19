@@ -68,10 +68,6 @@ class EmployeeProfileDialog(QDialog):
         self.qr_status.setStyleSheet("color: red;" if not self.employee.qr_code else "color: green;")
         qr_layout.addWidget(self.qr_status)
         
-        self.generate_qr_btn = QPushButton("Generate QR")
-        self.generate_qr_btn.clicked.connect(self.generate_qr)
-        qr_layout.addWidget(self.generate_qr_btn)
-        
         self.view_qr_btn = QPushButton("View QR")
         self.view_qr_btn.clicked.connect(self.view_qr)
         self.view_qr_btn.setEnabled(bool(self.employee.qr_code))
@@ -454,23 +450,6 @@ class AdminInterface(QWidget):
             profile_btn.setToolTip("View/Edit Employee Profile")
             profile_btn.clicked.connect(lambda checked, eid=emp.employee_id: self.view_profile(eid))
             action_layout.addWidget(profile_btn)
-            
-            # Generate QR button
-            qr_btn = QPushButton("QR")
-            qr_btn.setToolTip("Generate QR Code")
-            qr_btn.clicked.connect(lambda checked, eid=emp.employee_id: self.generate_qr(eid))
-            action_layout.addWidget(qr_btn)
-            
-            # Face button
-            face_btn = QPushButton("Face")
-            face_btn.setToolTip("Set Face Image")
-            face_btn.clicked.connect(lambda checked, eid=emp.employee_id: self.set_face(eid))
-            action_layout.addWidget(face_btn)
-            
-            # Enable/Disable button
-            toggle_btn = QPushButton("Disable" if emp.enabled else "Enable")
-            toggle_btn.clicked.connect(lambda checked, eid=emp.employee_id, enabled=emp.enabled: self.toggle_employee(eid, not enabled))
-            action_layout.addWidget(toggle_btn)
             
             action_widget.setLayout(action_layout)
             self.employee_table.setCellWidget(row, 5, action_widget)

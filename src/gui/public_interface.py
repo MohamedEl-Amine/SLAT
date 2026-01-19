@@ -247,7 +247,7 @@ class PublicInterface(QWidget):
         self.layout.addItem(QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Expanding))
 
         # Footer hint
-        footer = QLabel("Admin Access: Press F11 5 times")
+        footer = QLabel("Please do not share your login credentials with others.")
         footer.setFont(QFont("Arial", 10))
         footer.setAlignment(Qt.AlignCenter)
         footer.setStyleSheet("color: #95A5A6;")
