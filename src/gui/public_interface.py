@@ -1,13 +1,14 @@
 """
-Public interface for SLAT - Employee attendance registration.
+Interface publique pour SLAT - Enregistrement de présence des employés.
 """
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, 
                              QMessageBox, QInputDialog, QSpacerItem, QSizePolicy)
 from PyQt5.QtCore import Qt, QTimer, QDateTime
-from PyQt5.QtGui import QFont, QPalette, QColor
+from PyQt5.QtGui import QFont, QPalette, QColor, QPixmap
 import datetime
 import socket
+import os
 from database import Database
 from utils.qr_scanner import QRScanner
 
@@ -16,9 +17,12 @@ class PublicInterface(QWidget):
         super().__init__()
         self.db = Database()
         self.qr_scanner = QRScanner()
-        self.setWindowTitle("SLAT - Attendance Terminal")
+        self.setWindowTitle("SLAT - Terminal de Présence")
         self.showFullScreen()
         self.current_method = None
+        self.f11_press_count = 0
+        self.f11_reset_timer = QTimer()
+        self.f11_reset_timer.timeout.connect(self.reset_f11_count)
 
         # Set background color
         self.setAutoFillBackground(True)
@@ -34,6 +38,27 @@ class PublicInterface(QWidget):
         # Add top spacer
         self.layout.addItem(QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Expanding))
 
+        # Society logo and name
+        logo_layout = QHBoxLayout()
+        logo_layout.setAlignment(Qt.AlignCenter)
+        
+        # Logo
+        logo_path = os.path.join(os.path.dirname(__file__), '..', '..', 'assets', 'logo.png')
+        if os.path.exists(logo_path):
+            logo_label = QLabel()
+            logo_pixmap = QPixmap(logo_path)
+            logo_label.setPixmap(logo_pixmap.scaled(100, 100, Qt.KeepAspectRatio))
+            logo_layout.addWidget(logo_label)
+        
+        # Society name
+        society_label = QLabel("Facility Plus")
+        society_label.setFont(QFont("Arial", 24, QFont.Bold))
+        society_label.setAlignment(Qt.AlignCenter)
+        society_label.setStyleSheet("color: #2C3E50; padding: 10px;")
+        logo_layout.addWidget(society_label)
+        
+        self.layout.addLayout(logo_layout)
+
         # Current date and time display
         self.datetime_label = QLabel()
         self.datetime_label.setFont(QFont("Arial", 18))
@@ -48,11 +73,18 @@ class PublicInterface(QWidget):
         self.update_datetime()
 
         # Title
-        title = QLabel("SECURE LOCAL ATTENDANCE TERMINAL")
+        title = QLabel("TERMINAL DE PRÉSENCE LOCAL SÉCURISÉ")
         title.setFont(QFont("Arial", 36, QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("color: #2C3E50; padding: 20px;")
         self.layout.addWidget(title)
+
+        # Subtitle with developer info
+        subtitle = QLabel("SLAT - Développé par Innovista Dev")
+        subtitle.setFont(QFont("Arial", 16))
+        subtitle.setAlignment(Qt.AlignCenter)
+        subtitle.setStyleSheet("color: #7F8C8D; padding: 5px;")
+        self.layout.addWidget(subtitle)
 
         # Current window info
         self.window_info_label = QLabel()
@@ -67,8 +99,55 @@ class PublicInterface(QWidget):
         self.window_timer.timeout.connect(self.update_window_info)
         self.window_timer.start(60000)  # Update every minute
 
+        self.setup_method_buttons()
+
+    def is_within_time_window(self):
+        """Check if current time is within allowed attendance windows."""
+        now = datetime.datetime.now()
+        current_time = now.time()
+        
+        morning_start_str = self.db.get_setting('morning_start')
+        morning_end_str = self.db.get_setting('morning_end')
+        afternoon_start_str = self.db.get_setting('afternoon_start')
+        afternoon_end_str = self.db.get_setting('afternoon_end')
+        
+        try:
+            morning_start = datetime.datetime.strptime(morning_start_str, '%H:%M').time()
+            morning_end = datetime.datetime.strptime(morning_end_str, '%H:%M').time()
+            afternoon_start = datetime.datetime.strptime(afternoon_start_str, '%H:%M').time()
+            afternoon_end = datetime.datetime.strptime(afternoon_end_str, '%H:%M').time()
+            
+            return (morning_start <= current_time <= morning_end) or (afternoon_start <= current_time <= afternoon_end)
+        except:
+            return False  # If settings are invalid, assume outside window
+
+    def setup_method_buttons(self):
+        """Setup method selection buttons, only if within time window."""
+        # Remove existing method buttons if they exist
+        if hasattr(self, 'method_label') and self.method_label:
+            self.layout.removeWidget(self.method_label)
+            self.method_label.deleteLater()
+        if hasattr(self, 'buttons_layout'):
+            # Remove all widgets from buttons_layout
+            while self.buttons_layout.count():
+                item = self.buttons_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            self.layout.removeItem(self.buttons_layout)
+            self.buttons_layout.deleteLater()
+
+        # Check if within time window
+        if not self.is_within_time_window():
+            # Show message instead of buttons
+            self.method_label = QLabel("⏰ Présence non disponible en ce moment\n\nVeuillez revenir pendant les heures d'ouverture.")
+            self.method_label.setFont(QFont("Arial", 20))
+            self.method_label.setAlignment(Qt.AlignCenter)
+            self.method_label.setStyleSheet("color: #E74C3C; padding: 20px;")
+            self.layout.addWidget(self.method_label)
+            return
+
         # Method selection buttons
-        self.method_label = QLabel("Select Identification Method:")
+        self.method_label = QLabel("Sélectionnez la méthode d'identification :")
         self.method_label.setFont(QFont("Arial", 20))
         self.method_label.setAlignment(Qt.AlignCenter)
         self.method_label.setStyleSheet("color: #34495E; padding: 10px;")
@@ -85,7 +164,7 @@ class PublicInterface(QWidget):
         
         # Employee ID Button
         if card_enabled:
-            self.id_btn = QPushButton("📇\nEmployee ID")
+            self.id_btn = QPushButton("📇\nID Employé")
             self.id_btn.setFont(QFont("Arial", 18, QFont.Bold))
             self.id_btn.setMinimumSize(200, 150)
             self.id_btn.setStyleSheet("""
@@ -107,7 +186,7 @@ class PublicInterface(QWidget):
         
         # QR Code Button
         if qr_enabled:
-            self.qr_btn = QPushButton("📱\nQR Code")
+            self.qr_btn = QPushButton("📱\nCode QR")
             self.qr_btn.setFont(QFont("Arial", 18, QFont.Bold))
             self.qr_btn.setMinimumSize(200, 150)
             self.qr_btn.setStyleSheet("""
@@ -129,7 +208,7 @@ class PublicInterface(QWidget):
         
         # Face Recognition Button
         if face_enabled:
-            self.face_btn = QPushButton("👤\nFace Scan")
+            self.face_btn = QPushButton("👤\nScan Visage")
             self.face_btn.setFont(QFont("Arial", 18, QFont.Bold))
             self.face_btn.setMinimumSize(200, 150)
             self.face_btn.setStyleSheet("""
@@ -167,7 +246,7 @@ class PublicInterface(QWidget):
         self.id_input = QLineEdit()
         self.id_input.setFont(QFont("Arial", 28))
         self.id_input.setAlignment(Qt.AlignCenter)
-        self.id_input.setPlaceholderText("Enter Employee ID")
+        self.id_input.setPlaceholderText("Entrez l'ID employé")
         self.id_input.setStyleSheet("""
             QLineEdit {
                 padding: 15px;
@@ -189,7 +268,7 @@ class PublicInterface(QWidget):
         # Submit and Back buttons
         self.button_row = QHBoxLayout()
         
-        self.submit_btn = QPushButton("✓ Submit")
+        self.submit_btn = QPushButton("✓ Valider")
         self.submit_btn.setFont(QFont("Arial", 16, QFont.Bold))
         self.submit_btn.setMinimumSize(150, 50)
         self.submit_btn.setStyleSheet("""
@@ -206,7 +285,7 @@ class PublicInterface(QWidget):
         self.submit_btn.clicked.connect(self.process_attendance)
         self.button_row.addWidget(self.submit_btn)
         
-        self.back_btn = QPushButton("← Back")
+        self.back_btn = QPushButton("← Retour")
         self.back_btn.setFont(QFont("Arial", 16))
         self.back_btn.setMinimumSize(150, 50)
         self.back_btn.setStyleSheet("""
@@ -247,7 +326,7 @@ class PublicInterface(QWidget):
         self.layout.addItem(QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Expanding))
 
         # Footer hint
-        footer = QLabel("Please do not share your login credentials with others.")
+        footer = QLabel("Veuillez ne pas partager vos identifiants de connexion avec d'autres.")
         footer.setFont(QFont("Arial", 10))
         footer.setAlignment(Qt.AlignCenter)
         footer.setStyleSheet("color: #95A5A6;")
@@ -270,11 +349,7 @@ class PublicInterface(QWidget):
     def show_method_selection(self):
         """Show method selection buttons and hide input."""
         self.input_container.hide()
-        self.method_label.show()
-        for i in range(self.buttons_layout.count()):
-            widget = self.buttons_layout.itemAt(i).widget()
-            if widget:
-                widget.show()
+        self.setup_method_buttons()  # Ensure buttons are properly set up
         self.status_label.setText("")
         self.current_method = None
     
@@ -286,9 +361,9 @@ class PublicInterface(QWidget):
             widget = self.buttons_layout.itemAt(i).widget()
             if widget:
                 widget.hide()
-        self.instruction_label.setText("Enter your Employee ID:")
+        self.instruction_label.setText("Entrez votre ID employé :")
         self.id_input.clear()
-        self.id_input.setPlaceholderText("Enter Employee ID")
+        self.id_input.setPlaceholderText("Entrez l'ID employé")
         self.input_container.show()
         self.id_input.setFocus()
     
@@ -298,19 +373,19 @@ class PublicInterface(QWidget):
         
         # Check if camera is available
         if not self.qr_scanner.test_camera():
-            QMessageBox.critical(self, "Camera Error", 
-                               "❌ No camera detected.\n\n"
-                               "Please ensure a camera is connected and try again.",
+            QMessageBox.critical(self, "Erreur de caméra", 
+                               "❌ Aucune caméra détectée.\n\n"
+                               "Veuillez vous assurer qu'une caméra est connectée et réessayez.",
                                QMessageBox.Ok)
             self.show_method_selection()
             return
         
         # Show scanning message
-        QMessageBox.information(self, "QR Scanner", 
-                               "📱 QR Code Scanner\n\n"
-                               "Position your QR code in front of the camera.\n"
-                               "The scanner will automatically detect and process it.\n\n"
-                               "Press 'q' in the camera window to cancel.",
+        QMessageBox.information(self, "Scanner QR", 
+                               "📱 Scanner de code QR\n\n"
+                               "Placez votre code QR devant la caméra.\n"
+                               "Le scanner le détectera et le traitera automatiquement.\n\n"
+                               "Appuyez sur 'q' dans la fenêtre de caméra pour annuler.",
                                QMessageBox.Ok)
         
         # Scan QR code
@@ -321,9 +396,9 @@ class PublicInterface(QWidget):
             self.process_qr_attendance(qr_data)
         else:
             # No QR code found or cancelled
-            QMessageBox.warning(self, "Scan Cancelled", 
-                               "⚠ QR code scanning was cancelled or no code was detected.\n\n"
-                               "Please try again or use another method.",
+            QMessageBox.warning(self, "Scan annulé", 
+                               "⚠ Le scan du code QR a été annulé ou aucun code n'a été détecté.\n\n"
+                               "Veuillez réessayer ou utiliser une autre méthode.",
                                QMessageBox.Ok)
             self.show_method_selection()
     
@@ -331,8 +406,8 @@ class PublicInterface(QWidget):
         """Process attendance for scanned QR code."""
         try:
             if not employee_id:
-                QMessageBox.warning(self, "Invalid QR Code", 
-                                   "⚠ The scanned QR code does not contain valid data.",
+                QMessageBox.warning(self, "Code QR invalide", 
+                                   "⚠ Le code QR scanné ne contient pas de données valides.",
                                    QMessageBox.Ok)
                 self.show_method_selection()
                 return
@@ -340,17 +415,17 @@ class PublicInterface(QWidget):
             # Check if employee exists and enabled
             emp = self.db.get_employee(employee_id)
             if not emp:
-                QMessageBox.critical(self, "Not Found", 
-                                    f"✗ Employee ID '{employee_id}' not found.\n\n"
-                                    "Please check your QR code or contact administrator.",
+                QMessageBox.critical(self, "Non trouvé", 
+                                    f"✗ ID employé '{employee_id}' introuvable.\n\n"
+                                    "Veuillez vérifier votre code QR ou contacter l'administrateur.",
                                     QMessageBox.Ok)
                 self.show_method_selection()
                 return
             
             if not emp.enabled:
-                QMessageBox.critical(self, "Account Disabled", 
-                                    "✗ Your account has been disabled.\n\n"
-                                    "Please contact the administrator.",
+                QMessageBox.critical(self, "Compte désactivé", 
+                                    "✗ Votre compte a été désactivé.\n\n"
+                                    "Veuillez contacter l'administrateur.",
                                     QMessageBox.Ok)
                 self.show_method_selection()
                 return
@@ -366,9 +441,9 @@ class PublicInterface(QWidget):
                 
                 # If last attendance was within 5 minutes, prevent duplicate
                 if time_diff.total_seconds() < 300:  # 5 minutes
-                    QMessageBox.warning(self, "Duplicate Detected", 
-                                       f"⚠ You already checked {last_action} at {last_time_str}.\n\n"
-                                       "Please wait at least 5 minutes before checking again.",
+                    QMessageBox.warning(self, "Doublon détecté", 
+                                       f"⚠ Vous avez déjà pointé {last_action} à {last_time_str}.\n\n"
+                                       "Veuillez attendre au moins 5 minutes avant de pointer à nouveau.",
                                        QMessageBox.Ok)
                     self.show_method_selection()
                     return
@@ -392,21 +467,21 @@ class PublicInterface(QWidget):
             window_name = ""
             if morning_start <= current_time <= morning_end:
                 action = "IN"
-                window_name = "CHECK IN"
+                window_name = "ARRIVÉE"
             elif afternoon_start <= current_time <= afternoon_end:
                 action = "OUT"
-                window_name = "CHECK OUT"
+                window_name = "DÉPART"
             else:
                 # Show when next window opens
                 if current_time < morning_start:
-                    next_window = f"Morning check-in opens at {morning_start_str}"
+                    next_window = f"La arrivée du matin ouvre à {morning_start_str}"
                 elif current_time < afternoon_start:
-                    next_window = f"Afternoon check-out opens at {afternoon_start_str}"
+                    next_window = f"Le départ de l'après-midi ouvre à {afternoon_start_str}"
                 else:
-                    next_window = f"Next check-in tomorrow at {morning_start_str}"
+                    next_window = f"Prochaine arrivée demain à {morning_start_str}"
                 
-                QMessageBox.warning(self, "Outside Window", 
-                                   f"⚠ Attendance not allowed at this time.\n\n{next_window}",
+                QMessageBox.warning(self, "Hors fenêtre", 
+                                   f"⚠ Présence non autorisée à cette heure.\n\n{next_window}",
                                    QMessageBox.Ok)
                 self.show_method_selection()
                 return
@@ -416,8 +491,8 @@ class PublicInterface(QWidget):
             self.db.record_attendance(employee_id, action, 'qr', device_id)
             
             # Show success message
-            QMessageBox.information(self, "Success", 
-                                   f"✓ {window_name} SUCCESSFUL\n\n"
+            QMessageBox.information(self, "Succès", 
+                                   f"✓ {window_name} RÉUSSIE\n\n"
                                    f"{emp.name}\n"
                                    f"Time: {current_str}\n"
                                    f"Method: QR Code",
@@ -461,20 +536,23 @@ class PublicInterface(QWidget):
         afternoon_end = datetime.datetime.strptime(afternoon_end_str, '%H:%M').time()
 
         if morning_start <= current_time <= morning_end:
-            self.window_info_label.setText(f"✓ CHECK IN Window Active  ({morning_start_str} - {morning_end_str})")
+            self.window_info_label.setText(f"✓ Fenêtre ARRIVÉE Active  ({morning_start_str} - {morning_end_str})")
             self.window_info_label.setStyleSheet("color: #27AE60; font-weight: bold; padding: 10px; font-size: 18px;")
         elif afternoon_start <= current_time <= afternoon_end:
-            self.window_info_label.setText(f"✓ CHECK OUT Window Active  ({afternoon_start_str} - {afternoon_end_str})")
+            self.window_info_label.setText(f"✓ Fenêtre DÉPART Active  ({afternoon_start_str} - {afternoon_end_str})")
             self.window_info_label.setStyleSheet("color: #E67E22; font-weight: bold; padding: 10px; font-size: 18px;")
         else:
             # Show next window
             if current_time < morning_start:
-                self.window_info_label.setText(f"Next Window: CHECK IN at {morning_start_str}")
+                self.window_info_label.setText(f"Prochaine fenêtre : ARRIVÉE à {morning_start_str}")
             elif current_time < afternoon_start:
-                self.window_info_label.setText(f"Next Window: CHECK OUT at {afternoon_start_str}")
+                self.window_info_label.setText(f"Prochaine fenêtre : DÉPART à {afternoon_start_str}")
             else:
-                self.window_info_label.setText(f"Next Window: CHECK IN tomorrow at {morning_start_str}")
+                self.window_info_label.setText(f"Prochaine fenêtre : ARRIVÉE demain à {morning_start_str}")
             self.window_info_label.setStyleSheet("color: #E74C3C; padding: 10px; font-size: 16px;")
+        
+        # Update method buttons visibility based on time window
+        self.setup_method_buttons()
 
     def keyPressEvent(self, event):
         """Handle keyboard events."""

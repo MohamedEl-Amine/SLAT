@@ -21,11 +21,11 @@ class EmployeeProfileDialog(QDialog):
         self.employee = self.db.get_employee(employee_id)
         
         if not self.employee:
-            QMessageBox.critical(self, "Error", "Employee not found.")
+            QMessageBox.critical(self, "Erreur", "Employé introuvable.")
             self.reject()
             return
             
-        self.setWindowTitle(f"Employee Profile - {self.employee.name}")
+        self.setWindowTitle(f"Profil employé - {self.employee.name}")
         self.setFixedSize(800, 600)
         
         self.setup_ui()
@@ -36,39 +36,39 @@ class EmployeeProfileDialog(QDialog):
         self.setLayout(layout)
         
         # Employee Details Section
-        details_group = QGroupBox("Employee Details")
+        details_group = QGroupBox("Détails employé")
         details_layout = QFormLayout()
         
         self.name_edit = QLineEdit()
         self.name_edit.setText(self.employee.name)
-        details_layout.addRow("Name:", self.name_edit)
+        details_layout.addRow("Nom :", self.name_edit)
         
         self.id_label = QLabel(self.employee.employee_id)
-        details_layout.addRow("Employee ID:", self.id_label)
+        details_layout.addRow("ID employé :", self.id_label)
         
-        self.status_label = QLabel("Enabled" if self.employee.enabled else "Disabled")
+        self.status_label = QLabel("Activé" if self.employee.enabled else "Désactivé")
         self.status_label.setStyleSheet("color: green;" if self.employee.enabled else "color: red;")
-        details_layout.addRow("Status:", self.status_label)
+        details_layout.addRow("Statut :", self.status_label)
         
         self.created_label = QLabel(self.employee.created_at.strftime("%Y-%m-%d %H:%M") if self.employee.created_at else "N/A")
-        details_layout.addRow("Created:", self.created_label)
+        details_layout.addRow("Créé :", self.created_label)
         
         details_group.setLayout(details_layout)
         layout.addWidget(details_group)
         
         # Identification Methods Section
-        methods_group = QGroupBox("Identification Methods")
+        methods_group = QGroupBox("Méthodes d'identification")
         methods_layout = QVBoxLayout()
         
         # QR Code Section
         qr_layout = QHBoxLayout()
-        qr_layout.addWidget(QLabel("QR Code:"))
+        qr_layout.addWidget(QLabel("Code QR :"))
         
-        self.qr_status = QLabel("Not Generated" if not self.employee.qr_code else "Generated")
+        self.qr_status = QLabel("Non généré" if not self.employee.qr_code else "Généré")
         self.qr_status.setStyleSheet("color: red;" if not self.employee.qr_code else "color: green;")
         qr_layout.addWidget(self.qr_status)
         
-        self.view_qr_btn = QPushButton("View QR")
+        self.view_qr_btn = QPushButton("Voir QR")
         self.view_qr_btn.clicked.connect(self.view_qr)
         qr_layout.addWidget(self.view_qr_btn)
         
@@ -76,13 +76,13 @@ class EmployeeProfileDialog(QDialog):
         
         # Face Recognition Section
         face_layout = QHBoxLayout()
-        face_layout.addWidget(QLabel("Face Recognition:"))
+        face_layout.addWidget(QLabel("Reconnaissance faciale :"))
         
-        self.face_status = QLabel("Not Set" if not self.employee.face_image else "Set")
+        self.face_status = QLabel("Non défini" if not self.employee.face_image else "Défini")
         self.face_status.setStyleSheet("color: red;" if not self.employee.face_image else "color: green;")
         face_layout.addWidget(self.face_status)
         
-        self.set_face_btn = QPushButton("Set Face")
+        self.set_face_btn = QPushButton("Définir visage")
         self.set_face_btn.clicked.connect(self.set_face)
         face_layout.addWidget(self.set_face_btn)
         
@@ -92,12 +92,12 @@ class EmployeeProfileDialog(QDialog):
         layout.addWidget(methods_group)
         
         # Recent Attendance Section
-        attendance_group = QGroupBox("Recent Attendance (Last 10 records)")
+        attendance_group = QGroupBox("Présences récentes (10 derniers enregistrements)")
         attendance_layout = QVBoxLayout()
         
         self.attendance_table = QTableWidget()
         self.attendance_table.setColumnCount(4)
-        self.attendance_table.setHorizontalHeaderLabels(["Action", "Time", "Method", "Device"])
+        self.attendance_table.setHorizontalHeaderLabels(["Action", "Heure", "Méthode", "Appareil"])
         self.attendance_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.attendance_table.setEditTriggers(QTableWidget.NoEditTriggers)  # Make table readonly
         attendance_layout.addWidget(self.attendance_table)
@@ -108,15 +108,15 @@ class EmployeeProfileDialog(QDialog):
         # Buttons
         button_layout = QHBoxLayout()
         
-        self.save_btn = QPushButton("Save Changes")
+        self.save_btn = QPushButton("Sauvegarder modifications")
         self.save_btn.clicked.connect(self.save_changes)
         button_layout.addWidget(self.save_btn)
         
-        self.toggle_status_btn = QPushButton("Disable" if self.employee.enabled else "Enable")
+        self.toggle_status_btn = QPushButton("Désactiver" if self.employee.enabled else "Activer")
         self.toggle_status_btn.clicked.connect(self.toggle_status)
         button_layout.addWidget(self.toggle_status_btn)
         
-        close_btn = QPushButton("Close")
+        close_btn = QPushButton("Fermer")
         close_btn.clicked.connect(self.accept)
         button_layout.addWidget(close_btn)
         
@@ -139,11 +139,11 @@ class EmployeeProfileDialog(QDialog):
             try:
                 qr_bytes = self.db.generate_qr_code(self.employee_id)
                 self.employee = self.db.get_employee(self.employee_id)  # Refresh data
-                self.qr_status.setText("Generated")
+                self.qr_status.setText("Généré")
                 self.qr_status.setStyleSheet("color: green;")
                 self.view_qr_btn.setEnabled(True)
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to generate QR code: {str(e)}")
+                QMessageBox.critical(self, "Erreur", f"Échec de génération du code QR : {str(e)}")
                 return
             
         # Regenerate QR code image from employee_id
@@ -167,7 +167,7 @@ class EmployeeProfileDialog(QDialog):
         
         # Create a dialog to show the QR code
         qr_dialog = QDialog(self)
-        qr_dialog.setWindowTitle(f"QR Code - {self.employee.name}")
+        qr_dialog.setWindowTitle(f"Code QR - {self.employee.name}")
         qr_dialog.setFixedSize(400, 450)
         
         layout = QVBoxLayout()
@@ -192,19 +192,19 @@ class EmployeeProfileDialog(QDialog):
     def save_qr_image(self, qr_pixmap):
         filename, _ = QFileDialog.getSaveFileName(
             self,
-            "Save QR Code",
+            "Enregistrer le code QR",
             f"QR_{self.employee.employee_id}.png",
             "PNG Files (*.png)"
         )
         
         if filename:
             qr_pixmap.save(filename, "PNG")
-            QMessageBox.information(self, "Success", f"QR code saved to {filename}")
+            QMessageBox.information(self, "Succès", f"Code QR enregistré dans {filename}")
     
     def set_face(self):
         filename, _ = QFileDialog.getOpenFileName(
             self,
-            "Select Face Image",
+            "Sélectionner l'image faciale",
             "",
             "Image Files (*.png *.jpg *.jpeg)"
         )
@@ -214,36 +214,36 @@ class EmployeeProfileDialog(QDialog):
                 with open(filename, 'rb') as f:
                     face_data = f.read()
                 self.db.update_employee_face(self.employee_id, face_data)
-                QMessageBox.information(self, "Success", "Face image set successfully.")
+                QMessageBox.information(self, "Succès", "Image faciale définie avec succès.")
                 self.employee = self.db.get_employee(self.employee_id)  # Refresh data
-                self.face_status.setText("Set")
+                self.face_status.setText("Défini")
                 self.face_status.setStyleSheet("color: green;")
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to set face image: {str(e)}")
+                QMessageBox.critical(self, "Erreur", f"Échec de définition de l'image faciale : {str(e)}")
     
     def save_changes(self):
         new_name = self.name_edit.text().strip()
         if not new_name:
-            QMessageBox.warning(self, "Error", "Name cannot be empty.")
+            QMessageBox.warning(self, "Erreur", "Le nom ne peut pas être vide.")
             return
             
         if new_name != self.employee.name:
             success = self.db.update_employee_name(self.employee_id, new_name)
             if success:
-                QMessageBox.information(self, "Success", "Employee name updated successfully.")
+                QMessageBox.information(self, "Succès", "Nom de l'employé mis à jour avec succès.")
                 self.employee.name = new_name
-                self.setWindowTitle(f"Employee Profile - {new_name}")
+                self.setWindowTitle(f"Profil employé - {new_name}")
             else:
-                QMessageBox.critical(self, "Error", "Failed to update employee name.")
+                QMessageBox.critical(self, "Erreur", "Échec de mise à jour du nom de l'employé.")
     
     def toggle_status(self):
         new_status = not self.employee.enabled
         self.db.update_employee_status(self.employee_id, new_status)
         self.employee.enabled = new_status
-        self.status_label.setText("Enabled" if new_status else "Disabled")
+        self.status_label.setText("Activé" if new_status else "Désactivé")
         self.status_label.setStyleSheet("color: green;" if new_status else "color: red;")
-        self.toggle_status_btn.setText("Disable" if new_status else "Enable")
-        QMessageBox.information(self, "Success", f"Employee {'enabled' if new_status else 'disabled'}.")
+        self.toggle_status_btn.setText("Désactiver" if new_status else "Activer")
+        QMessageBox.information(self, "Succès", f"Employé {'activé' if new_status else 'désactivé'}.")
 
 
 class AdminInterface(QWidget):
@@ -251,7 +251,7 @@ class AdminInterface(QWidget):
         super().__init__()
         self.db = db
         self.public = public
-        self.setWindowTitle("SLAT - Admin Panel")
+        self.setWindowTitle("SLAT - Panneau d'administration")
         self.setFixedSize(1000, 700)
 
         self.layout = QVBoxLayout()
@@ -264,20 +264,20 @@ class AdminInterface(QWidget):
         # Employee Management Tab
         self.employee_tab = QWidget()
         self.setup_employee_tab()
-        self.tabs.addTab(self.employee_tab, "Employee Management")
+        self.tabs.addTab(self.employee_tab, "Gestion employés")
 
         # Settings Tab
         self.settings_tab = QWidget()
         self.setup_settings_tab()
-        self.tabs.addTab(self.settings_tab, "Settings")
+        self.tabs.addTab(self.settings_tab, "Paramètres")
 
         # Logs Tab
         self.logs_tab = QWidget()
         self.setup_logs_tab()
-        self.tabs.addTab(self.logs_tab, "Attendance Logs")
+        self.tabs.addTab(self.logs_tab, "Journaux présence")
 
         # Logout button
-        logout_btn = QPushButton("Logout")
+        logout_btn = QPushButton("Déconnexion")
         logout_btn.clicked.connect(self.logout)
         self.layout.addWidget(logout_btn)
 
@@ -291,15 +291,15 @@ class AdminInterface(QWidget):
 
         # Add Employee Section
         add_layout = QHBoxLayout()
-        add_layout.addWidget(QLabel("Employee ID:"))
+        add_layout.addWidget(QLabel("ID employé :"))
         self.emp_id_input = QLineEdit()
         add_layout.addWidget(self.emp_id_input)
 
-        add_layout.addWidget(QLabel("Name:"))
+        add_layout.addWidget(QLabel("Nom :"))
         self.emp_name_input = QLineEdit()
         add_layout.addWidget(self.emp_name_input)
 
-        add_btn = QPushButton("Add Employee")
+        add_btn = QPushButton("Ajouter employé")
         add_btn.clicked.connect(self.add_employee)
         add_layout.addWidget(add_btn)
 
@@ -308,7 +308,7 @@ class AdminInterface(QWidget):
         # Employee List
         self.employee_table = QTableWidget()
         self.employee_table.setColumnCount(6)
-        self.employee_table.setHorizontalHeaderLabels(["ID", "Name", "Status", "QR Code", "Face", "Actions"])
+        self.employee_table.setHorizontalHeaderLabels(["ID", "Nom", "Statut", "Code QR", "Visage", "Actions"])
         self.employee_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.employee_table.setEditTriggers(QTableWidget.NoEditTriggers)  # Make table readonly
         layout.addWidget(self.employee_table)
@@ -319,25 +319,25 @@ class AdminInterface(QWidget):
 
         # Time Windows
         time_layout = QVBoxLayout()
-        time_layout.addWidget(QLabel("Morning Window:"))
+        time_layout.addWidget(QLabel("Fenêtre matin :"))
 
         morning_layout = QHBoxLayout()
-        morning_layout.addWidget(QLabel("Start:"))
+        morning_layout.addWidget(QLabel("Début :"))
         self.morning_start = QTimeEdit()
         self.morning_start.setTime(QTime.fromString(self.db.get_setting('morning_start'), 'hh:mm'))
         morning_layout.addWidget(self.morning_start)
 
-        morning_layout.addWidget(QLabel("End:"))
+        morning_layout.addWidget(QLabel("Fin :"))
         self.morning_end = QTimeEdit()
         self.morning_end.setTime(QTime.fromString(self.db.get_setting('morning_end'), 'hh:mm'))
         morning_layout.addWidget(self.morning_end)
 
         time_layout.addLayout(morning_layout)
 
-        time_layout.addWidget(QLabel("Afternoon Window:"))
+        time_layout.addWidget(QLabel("Fenêtre après-midi :"))
 
         afternoon_layout = QHBoxLayout()
-        afternoon_layout.addWidget(QLabel("Start:"))
+        afternoon_layout.addWidget(QLabel("Début :"))
         self.afternoon_start = QTimeEdit()
         self.afternoon_start.setTime(QTime.fromString(self.db.get_setting('afternoon_start'), 'hh:mm'))
         afternoon_layout.addWidget(self.afternoon_start)
@@ -353,23 +353,23 @@ class AdminInterface(QWidget):
 
         # Identification Methods
         methods_layout = QVBoxLayout()
-        methods_layout.addWidget(QLabel("Global Identification Methods (Available to all employees):"))
+        methods_layout.addWidget(QLabel("Méthodes d'identification globales (disponibles pour tous les employés) :"))
 
-        self.card_enabled = QCheckBox("Employee ID / Card Entry")
+        self.card_enabled = QCheckBox("Entrée par carte d'employé / ID")
         self.card_enabled.setChecked(self.db.get_setting('card_enabled') == '1')
         methods_layout.addWidget(self.card_enabled)
 
-        self.qr_enabled = QCheckBox("QR Code Scanning")
+        self.qr_enabled = QCheckBox("Numérisation de code QR")
         self.qr_enabled.setChecked(self.db.get_setting('qr_enabled') == '1')
         methods_layout.addWidget(self.qr_enabled)
 
-        self.face_enabled = QCheckBox("Face Recognition")
+        self.face_enabled = QCheckBox("Reconnaissance faciale")
         self.face_enabled.setChecked(self.db.get_setting('face_enabled') == '1')
         methods_layout.addWidget(self.face_enabled)
 
         layout.addLayout(methods_layout)
 
-        save_btn = QPushButton("Save Settings")
+        save_btn = QPushButton("Enregistrer les paramètres")
         save_btn.clicked.connect(self.save_settings)
         layout.addWidget(save_btn)
 
@@ -380,18 +380,18 @@ class AdminInterface(QWidget):
         # Logs Table
         self.logs_table = QTableWidget()
         self.logs_table.setColumnCount(6)
-        self.logs_table.setHorizontalHeaderLabels(["Employee ID", "Name", "Action", "Time", "Method", "Device"])
+        self.logs_table.setHorizontalHeaderLabels(["ID Employé", "Nom", "Action", "Heure", "Méthode", "Appareil"])
         self.logs_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.logs_table.setEditTriggers(QTableWidget.NoEditTriggers)  # Make table readonly
         layout.addWidget(self.logs_table)
 
         # Refresh and Export buttons
         button_layout = QHBoxLayout()
-        refresh_btn = QPushButton("Refresh Logs")
+        refresh_btn = QPushButton("Actualiser les journaux")
         refresh_btn.clicked.connect(self.load_logs)
         button_layout.addWidget(refresh_btn)
 
-        export_btn = QPushButton("Export Logs to CSV")
+        export_btn = QPushButton("Exporter les journaux en CSV")
         export_btn.clicked.connect(self.export_logs)
         button_layout.addWidget(export_btn)
 
@@ -402,18 +402,18 @@ class AdminInterface(QWidget):
         name = self.emp_name_input.text().strip()
         
         if not emp_id or not name:
-            QMessageBox.warning(self, "Error", "Please enter both ID and name.")
+            QMessageBox.warning(self, "Erreur", "Veuillez saisir l'ID et le nom.")
             return
         
         # Add to database
         success = self.db.add_employee(emp_id, name)
         if success:
-            QMessageBox.information(self, "Success", f"Employee {name} added successfully.")
+            QMessageBox.information(self, "Succès", f"Employé {name} ajouté avec succès.")
             self.emp_id_input.clear()
             self.emp_name_input.clear()
             self.load_employees()
         else:
-            QMessageBox.warning(self, "Error", f"Employee ID {emp_id} already exists.")
+            QMessageBox.warning(self, "Erreur", f"L'ID employé {emp_id} existe déjà.")
             self.emp_name_input.clear()
             self.load_employees()
 
@@ -443,7 +443,7 @@ class AdminInterface(QWidget):
             
             # Profile button
             profile_btn = QPushButton("Profile")
-            profile_btn.setToolTip("View/Edit Employee Profile")
+            profile_btn.setToolTip("Voir/Modifier le profil employé")
             profile_btn.clicked.connect(lambda checked, eid=emp.employee_id: self.view_profile(eid))
             action_layout.addWidget(profile_btn)
             
@@ -466,16 +466,16 @@ class AdminInterface(QWidget):
             if filename:
                 with open(filename, 'wb') as f:
                     f.write(qr_bytes)
-                QMessageBox.information(self, "Success", f"QR code generated and saved to {filename}")
+                QMessageBox.information(self, "Succès", f"Code QR généré et enregistré dans {filename}")
                 self.load_employees()
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to generate QR code: {str(e)}")
+            QMessageBox.critical(self, "Erreur", f"Échec de génération du code QR : {str(e)}")
     
     def set_face(self, employee_id):
         """Set face image for employee"""
         filename, _ = QFileDialog.getOpenFileName(
             self,
-            "Select Face Image",
+            "Sélectionner l'image faciale",
             "",
             "Image Files (*.png *.jpg *.jpeg)"
         )
@@ -485,16 +485,16 @@ class AdminInterface(QWidget):
                 with open(filename, 'rb') as f:
                     face_data = f.read()
                 self.db.update_employee_face(employee_id, face_data)
-                QMessageBox.information(self, "Success", f"Face image set for {employee_id}")
+                QMessageBox.information(self, "Succès", f"Image faciale définie pour {employee_id}")
                 self.load_employees()
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to set face image: {str(e)}")
+                QMessageBox.critical(self, "Erreur", f"Échec de définition de l'image faciale : {str(e)}")
 
     def toggle_employee(self, employee_id, new_status):
         """Enable or disable an employee"""
         self.db.update_employee_status(employee_id, new_status)
         self.load_employees()
-        QMessageBox.information(self, "Success", f"Employee {employee_id} {'enabled' if new_status else 'disabled'}.")
+        QMessageBox.information(self, "Succès", f"Employé {employee_id} {'activé' if new_status else 'désactivé'}.")
 
     def load_logs(self):
         """Load attendance logs into the table"""
@@ -525,13 +525,13 @@ class AdminInterface(QWidget):
         self.db.update_setting('qr_enabled', '1' if self.qr_enabled.isChecked() else '0')
         self.db.update_setting('face_enabled', '1' if self.face_enabled.isChecked() else '0')
 
-        QMessageBox.information(self, "Success", "Settings saved successfully.")
+        QMessageBox.information(self, "Succès", "Paramètres enregistrés avec succès.")
 
     def export_logs(self):
         """Export logs to CSV file"""
         filename, _ = QFileDialog.getSaveFileName(
             self, 
-            "Export Logs", 
+            "Exporter les journaux", 
             f"attendance_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             "CSV Files (*.csv)"
         )
@@ -556,9 +556,9 @@ class AdminInterface(QWidget):
                             log[7]   # integrity_hash
                         ])
                 
-                QMessageBox.information(self, "Success", f"Logs exported to {filename}")
+                QMessageBox.information(self, "Succès", f"Journaux exportés vers {filename}")
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to export logs: {str(e)}")
+                QMessageBox.critical(self, "Erreur", f"Échec d'exportation des journaux : {str(e)}")
 
     def logout(self):
         self.close()
