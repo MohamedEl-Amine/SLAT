@@ -131,8 +131,8 @@ class PublicInterface(QWidget):
         # Camera display label
         self.camera_label = QLabel()
         self.camera_label.setAlignment(Qt.AlignCenter)
-        self.camera_label.setMinimumSize(640, 480)
-        self.camera_label.setMaximumSize(800, 600)
+        self.camera_label.setFixedSize(640, 480)
+        self.camera_label.setScaledContents(False)
         self.camera_label.setStyleSheet("""
             QLabel {
                 border: 3px solid #3498DB;
