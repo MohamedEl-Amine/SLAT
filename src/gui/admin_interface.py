@@ -70,7 +70,6 @@ class EmployeeProfileDialog(QDialog):
         
         self.view_qr_btn = QPushButton("View QR")
         self.view_qr_btn.clicked.connect(self.view_qr)
-        self.view_qr_btn.setEnabled(bool(self.employee.qr_code))
         qr_layout.addWidget(self.view_qr_btn)
         
         methods_layout.addLayout(qr_layout)
@@ -134,21 +133,18 @@ class EmployeeProfileDialog(QDialog):
             self.attendance_table.setItem(row, 2, QTableWidgetItem(log.method_used))
             self.attendance_table.setItem(row, 3, QTableWidgetItem(log.device_id if log.device_id else "N/A"))
     
-    def generate_qr(self):
-        try:
-            qr_bytes = self.db.generate_qr_code(self.employee_id)
-            QMessageBox.information(self, "Success", "QR code generated successfully.")
-            self.employee = self.db.get_employee(self.employee_id)  # Refresh data
-            self.qr_status.setText("Generated")
-            self.qr_status.setStyleSheet("color: green;")
-            self.view_qr_btn.setEnabled(True)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to generate QR code: {str(e)}")
-    
     def view_qr(self):
+        # Generate QR code if it doesn't exist
         if not self.employee.qr_code:
-            QMessageBox.warning(self, "Warning", "No QR code available.")
-            return
+            try:
+                qr_bytes = self.db.generate_qr_code(self.employee_id)
+                self.employee = self.db.get_employee(self.employee_id)  # Refresh data
+                self.qr_status.setText("Generated")
+                self.qr_status.setStyleSheet("color: green;")
+                self.view_qr_btn.setEnabled(True)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to generate QR code: {str(e)}")
+                return
             
         # Regenerate QR code image from employee_id
         import qrcode

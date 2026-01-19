@@ -359,8 +359,8 @@ class PublicInterface(QWidget):
             recent_logs = self.db.get_employee_logs(employee_id)
             if recent_logs:
                 last_log = recent_logs[0]  # Most recent log
-                last_timestamp = datetime.datetime.strptime(last_log[3], '%Y-%m-%d %H:%M:%S.%f')
-                last_action = last_log[2]  # 'IN' or 'OUT'
+                last_timestamp = last_log.timestamp
+                last_action = last_log.action  # 'IN' or 'OUT'
                 last_time_str = last_timestamp.strftime("%H:%M")
                 time_diff = datetime.datetime.now() - last_timestamp
                 
@@ -547,8 +547,8 @@ class PublicInterface(QWidget):
             recent_logs = self.db.get_employee_logs(employee_id)
             if recent_logs:
                 last_log = recent_logs[0]  # Most recent log
-                last_timestamp = datetime.datetime.strptime(last_log[3], '%Y-%m-%d %H:%M:%S.%f')
-                last_action = last_log[2]  # 'IN' or 'OUT'
+                last_timestamp = last_log.timestamp
+                last_action = last_log.action  # 'IN' or 'OUT'
                 last_time_str = last_timestamp.strftime("%H:%M")
                 time_diff = datetime.datetime.now() - last_timestamp
                 
