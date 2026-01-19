@@ -8,6 +8,7 @@ import os
 from datetime import datetime
 from cryptography.fernet import Fernet
 import hashlib
+from models import Employee, AttendanceRecord
 
 class Employee:
     def __init__(self, id, employee_id, name, enabled, qr_code, face_image, created_at):
@@ -116,7 +117,8 @@ class Database:
             cursor.execute('SELECT * FROM employees WHERE employee_id = ?', (employee_id,))
             row = cursor.fetchone()
             if row:
-                return Employee(id=row[0], employee_id=row[1], name=row[2], enabled=bool(row[3]), qr_code=row[4], face_image=row[5], created_at=row[6])
+                created_at = datetime.fromisoformat(row[6]) if row[6] else None
+                return Employee(id=row[0], employee_id=row[1], name=row[2], enabled=bool(row[3]), qr_code=row[4], face_image=row[5], created_at=created_at)
             return None
     
     def get_employee_by_qr(self, qr_code):
@@ -126,7 +128,8 @@ class Database:
             cursor.execute('SELECT * FROM employees WHERE qr_code = ?', (qr_code,))
             row = cursor.fetchone()
             if row:
-                return Employee(id=row[0], employee_id=row[1], name=row[2], enabled=bool(row[3]), qr_code=row[4], face_image=row[5], created_at=row[6])
+                created_at = datetime.fromisoformat(row[6]) if row[6] else None
+                return Employee(id=row[0], employee_id=row[1], name=row[2], enabled=bool(row[3]), qr_code=row[4], face_image=row[5], created_at=created_at)
             return None
 
     def record_attendance(self, employee_id, action, method_used, device_id, photo=None):
@@ -200,6 +203,7 @@ class Database:
             rows = cursor.fetchall()
             employees = []
             for row in rows:
+                created_at = datetime.fromisoformat(row[6]) if row[6] else None
                 employees.append(Employee(
                     id=row[0], 
                     employee_id=row[1], 
@@ -207,7 +211,7 @@ class Database:
                     enabled=bool(row[3]), 
                     qr_code=row[4], 
                     face_image=row[5], 
-                    created_at=row[6]
+                    created_at=created_at
                 ))
             return employees
 
@@ -217,6 +221,14 @@ class Database:
             cursor = conn.cursor()
             cursor.execute('UPDATE employees SET enabled = ? WHERE employee_id = ?', (int(enabled), employee_id))
             conn.commit()
+
+    def update_employee_name(self, employee_id, new_name):
+        """Update employee name"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('UPDATE employees SET name = ? WHERE employee_id = ?', (new_name, employee_id))
+            conn.commit()
+            return cursor.rowcount > 0
 
     def get_all_logs(self, limit=None):
         """Get all attendance logs"""
@@ -228,12 +240,30 @@ class Database:
             cursor.execute(query)
             return cursor.fetchall()
 
-    def get_employee_logs(self, employee_id):
+    def get_employee_logs(self, employee_id, limit=None):
         """Get attendance logs for specific employee"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT * FROM attendance_logs WHERE employee_id = ? ORDER BY timestamp DESC', (employee_id,))
-            return cursor.fetchall()
+            query = 'SELECT * FROM attendance_logs WHERE employee_id = ? ORDER BY timestamp DESC'
+            if limit:
+                query += f' LIMIT {limit}'
+            cursor.execute(query, (employee_id,))
+            rows = cursor.fetchall()
+            
+            # Convert to AttendanceRecord objects
+            records = []
+            for row in rows:
+                records.append(AttendanceRecord(
+                    id=row[0],
+                    employee_id=row[1],
+                    action=row[2],
+                    timestamp=datetime.fromisoformat(row[3]),
+                    method_used=row[4],
+                    device_id=row[5],
+                    photo=row[6],
+                    integrity_hash=row[7]
+                ))
+            return records
 
     def hash_password(self, password):
         """Hash a password"""

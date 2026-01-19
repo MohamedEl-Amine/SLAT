@@ -4,11 +4,255 @@ Admin interface for SLAT - Configuration and management.
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, 
                              QTableWidget, QTableWidgetItem, QTabWidget, QCheckBox, QMessageBox, 
-                             QTimeEdit, QComboBox, QHeaderView, QFileDialog)
+                             QTimeEdit, QComboBox, QHeaderView, QFileDialog, QDialog, QFormLayout,
+                             QGroupBox, QTextEdit, QScrollArea, QFrame)
 from PyQt5.QtCore import Qt, QTime
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QPixmap, QImage, QPixmap, QImage
 import csv
 from datetime import datetime
+from io import BytesIO
+import base64
+
+class EmployeeProfileDialog(QDialog):
+    def __init__(self, db, employee_id):
+        super().__init__()
+        self.db = db
+        self.employee_id = employee_id
+        self.employee = self.db.get_employee(employee_id)
+        
+        if not self.employee:
+            QMessageBox.critical(self, "Error", "Employee not found.")
+            self.reject()
+            return
+            
+        self.setWindowTitle(f"Employee Profile - {self.employee.name}")
+        self.setFixedSize(800, 600)
+        
+        self.setup_ui()
+        self.load_employee_data()
+        
+    def setup_ui(self):
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+        
+        # Employee Details Section
+        details_group = QGroupBox("Employee Details")
+        details_layout = QFormLayout()
+        
+        self.name_edit = QLineEdit()
+        self.name_edit.setText(self.employee.name)
+        details_layout.addRow("Name:", self.name_edit)
+        
+        self.id_label = QLabel(self.employee.employee_id)
+        details_layout.addRow("Employee ID:", self.id_label)
+        
+        self.status_label = QLabel("Enabled" if self.employee.enabled else "Disabled")
+        self.status_label.setStyleSheet("color: green;" if self.employee.enabled else "color: red;")
+        details_layout.addRow("Status:", self.status_label)
+        
+        self.created_label = QLabel(self.employee.created_at.strftime("%Y-%m-%d %H:%M") if self.employee.created_at else "N/A")
+        details_layout.addRow("Created:", self.created_label)
+        
+        details_group.setLayout(details_layout)
+        layout.addWidget(details_group)
+        
+        # Identification Methods Section
+        methods_group = QGroupBox("Identification Methods")
+        methods_layout = QVBoxLayout()
+        
+        # QR Code Section
+        qr_layout = QHBoxLayout()
+        qr_layout.addWidget(QLabel("QR Code:"))
+        
+        self.qr_status = QLabel("Not Generated" if not self.employee.qr_code else "Generated")
+        self.qr_status.setStyleSheet("color: red;" if not self.employee.qr_code else "color: green;")
+        qr_layout.addWidget(self.qr_status)
+        
+        self.generate_qr_btn = QPushButton("Generate QR")
+        self.generate_qr_btn.clicked.connect(self.generate_qr)
+        qr_layout.addWidget(self.generate_qr_btn)
+        
+        self.view_qr_btn = QPushButton("View QR")
+        self.view_qr_btn.clicked.connect(self.view_qr)
+        self.view_qr_btn.setEnabled(bool(self.employee.qr_code))
+        qr_layout.addWidget(self.view_qr_btn)
+        
+        methods_layout.addLayout(qr_layout)
+        
+        # Face Recognition Section
+        face_layout = QHBoxLayout()
+        face_layout.addWidget(QLabel("Face Recognition:"))
+        
+        self.face_status = QLabel("Not Set" if not self.employee.face_image else "Set")
+        self.face_status.setStyleSheet("color: red;" if not self.employee.face_image else "color: green;")
+        face_layout.addWidget(self.face_status)
+        
+        self.set_face_btn = QPushButton("Set Face")
+        self.set_face_btn.clicked.connect(self.set_face)
+        face_layout.addWidget(self.set_face_btn)
+        
+        methods_layout.addLayout(face_layout)
+        
+        methods_group.setLayout(methods_layout)
+        layout.addWidget(methods_group)
+        
+        # Recent Attendance Section
+        attendance_group = QGroupBox("Recent Attendance (Last 10 records)")
+        attendance_layout = QVBoxLayout()
+        
+        self.attendance_table = QTableWidget()
+        self.attendance_table.setColumnCount(4)
+        self.attendance_table.setHorizontalHeaderLabels(["Action", "Time", "Method", "Device"])
+        self.attendance_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.attendance_table.setEditTriggers(QTableWidget.NoEditTriggers)  # Make table readonly
+        attendance_layout.addWidget(self.attendance_table)
+        
+        attendance_group.setLayout(attendance_layout)
+        layout.addWidget(attendance_group)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        self.save_btn = QPushButton("Save Changes")
+        self.save_btn.clicked.connect(self.save_changes)
+        button_layout.addWidget(self.save_btn)
+        
+        self.toggle_status_btn = QPushButton("Disable" if self.employee.enabled else "Enable")
+        self.toggle_status_btn.clicked.connect(self.toggle_status)
+        button_layout.addWidget(self.toggle_status_btn)
+        
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        button_layout.addWidget(close_btn)
+        
+        layout.addLayout(button_layout)
+        
+    def load_employee_data(self):
+        # Load recent attendance logs
+        logs = self.db.get_employee_logs(self.employee_id, limit=10)
+        self.attendance_table.setRowCount(len(logs))
+        
+        for row, log in enumerate(logs):
+            self.attendance_table.setItem(row, 0, QTableWidgetItem(log.action))
+            self.attendance_table.setItem(row, 1, QTableWidgetItem(log.timestamp.strftime("%Y-%m-%d %H:%M:%S")))
+            self.attendance_table.setItem(row, 2, QTableWidgetItem(log.method_used))
+            self.attendance_table.setItem(row, 3, QTableWidgetItem(log.device_id if log.device_id else "N/A"))
+    
+    def generate_qr(self):
+        try:
+            qr_bytes = self.db.generate_qr_code(self.employee_id)
+            QMessageBox.information(self, "Success", "QR code generated successfully.")
+            self.employee = self.db.get_employee(self.employee_id)  # Refresh data
+            self.qr_status.setText("Generated")
+            self.qr_status.setStyleSheet("color: green;")
+            self.view_qr_btn.setEnabled(True)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to generate QR code: {str(e)}")
+    
+    def view_qr(self):
+        if not self.employee.qr_code:
+            QMessageBox.warning(self, "Warning", "No QR code available.")
+            return
+            
+        # Regenerate QR code image from employee_id
+        import qrcode
+        from io import BytesIO
+        
+        qr = qrcode.QRCode(version=1, box_size=10, border=5)
+        qr.add_data(self.employee.employee_id)
+        qr.make(fit=True)
+        
+        img = qr.make_image(fill_color="black", back_color="white")
+        
+        # Convert to QPixmap
+        buffer = BytesIO()
+        img.save(buffer, format='PNG')
+        qr_bytes = buffer.getvalue()
+        
+        qr_image = QImage()
+        qr_image.loadFromData(qr_bytes)
+        qr_pixmap = QPixmap.fromImage(qr_image)
+        
+        # Create a dialog to show the QR code
+        qr_dialog = QDialog(self)
+        qr_dialog.setWindowTitle(f"QR Code - {self.employee.name}")
+        qr_dialog.setFixedSize(400, 450)
+        
+        layout = QVBoxLayout()
+        
+        qr_label = QLabel()
+        qr_label.setPixmap(qr_pixmap.scaled(300, 300, Qt.KeepAspectRatio))
+        layout.addWidget(qr_label, alignment=Qt.AlignCenter)
+        
+        # Employee info
+        info_label = QLabel(f"Employee: {self.employee.name}\nID: {self.employee.employee_id}")
+        info_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(info_label)
+        
+        # Save button
+        save_btn = QPushButton("Save QR Image")
+        save_btn.clicked.connect(lambda: self.save_qr_image(qr_pixmap))
+        layout.addWidget(save_btn)
+        
+        qr_dialog.setLayout(layout)
+        qr_dialog.exec_()
+    
+    def save_qr_image(self, qr_pixmap):
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save QR Code",
+            f"QR_{self.employee.employee_id}.png",
+            "PNG Files (*.png)"
+        )
+        
+        if filename:
+            qr_pixmap.save(filename, "PNG")
+            QMessageBox.information(self, "Success", f"QR code saved to {filename}")
+    
+    def set_face(self):
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Face Image",
+            "",
+            "Image Files (*.png *.jpg *.jpeg)"
+        )
+        
+        if filename:
+            try:
+                with open(filename, 'rb') as f:
+                    face_data = f.read()
+                self.db.update_employee_face(self.employee_id, face_data)
+                QMessageBox.information(self, "Success", "Face image set successfully.")
+                self.employee = self.db.get_employee(self.employee_id)  # Refresh data
+                self.face_status.setText("Set")
+                self.face_status.setStyleSheet("color: green;")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to set face image: {str(e)}")
+    
+    def save_changes(self):
+        new_name = self.name_edit.text().strip()
+        if not new_name:
+            QMessageBox.warning(self, "Error", "Name cannot be empty.")
+            return
+            
+        if new_name != self.employee.name:
+            success = self.db.update_employee_name(self.employee_id, new_name)
+            if success:
+                QMessageBox.information(self, "Success", "Employee name updated successfully.")
+                self.employee.name = new_name
+                self.setWindowTitle(f"Employee Profile - {new_name}")
+            else:
+                QMessageBox.critical(self, "Error", "Failed to update employee name.")
+    
+    def toggle_status(self):
+        new_status = not self.employee.enabled
+        self.db.update_employee_status(self.employee_id, new_status)
+        self.employee.enabled = new_status
+        self.status_label.setText("Enabled" if new_status else "Disabled")
+        self.status_label.setStyleSheet("color: green;" if new_status else "color: red;")
+        self.toggle_status_btn.setText("Disable" if new_status else "Enable")
+        QMessageBox.information(self, "Success", f"Employee {'enabled' if new_status else 'disabled'}.")
+
 
 class AdminInterface(QWidget):
     def __init__(self, db, public):
@@ -71,9 +315,10 @@ class AdminInterface(QWidget):
 
         # Employee List
         self.employee_table = QTableWidget()
-        self.employee_table.setColumnCount(5)
-        self.employee_table.setHorizontalHeaderLabels(["ID", "Name", "QR Code", "Face", "Actions"])
+        self.employee_table.setColumnCount(6)
+        self.employee_table.setHorizontalHeaderLabels(["ID", "Name", "Status", "QR Code", "Face", "Actions"])
         self.employee_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.employee_table.setEditTriggers(QTableWidget.NoEditTriggers)  # Make table readonly
         layout.addWidget(self.employee_table)
 
     def setup_settings_tab(self):
@@ -145,6 +390,7 @@ class AdminInterface(QWidget):
         self.logs_table.setColumnCount(6)
         self.logs_table.setHorizontalHeaderLabels(["Employee ID", "Name", "Action", "Time", "Method", "Device"])
         self.logs_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.logs_table.setEditTriggers(QTableWidget.NoEditTriggers)  # Make table readonly
         layout.addWidget(self.logs_table)
 
         # Refresh and Export buttons
@@ -179,6 +425,13 @@ class AdminInterface(QWidget):
             self.emp_name_input.clear()
             self.load_employees()
 
+    def view_profile(self, employee_id):
+        """Open employee profile dialog"""
+        dialog = EmployeeProfileDialog(self.db, employee_id)
+        dialog.exec_()
+        # Refresh the table after dialog closes
+        self.load_employees()
+
     def load_employees(self):
         """Load all employees into the table"""
         employees = self.db.get_all_employees()
@@ -187,13 +440,20 @@ class AdminInterface(QWidget):
         for row, emp in enumerate(employees):
             self.employee_table.setItem(row, 0, QTableWidgetItem(emp.employee_id))
             self.employee_table.setItem(row, 1, QTableWidgetItem(emp.name))
-            self.employee_table.setItem(row, 2, QTableWidgetItem("✓" if emp.qr_code else "✗"))
-            self.employee_table.setItem(row, 3, QTableWidgetItem("✓" if emp.face_image else "✗"))
+            self.employee_table.setItem(row, 2, QTableWidgetItem("Enabled" if emp.enabled else "Disabled"))
+            self.employee_table.setItem(row, 3, QTableWidgetItem("✓" if emp.qr_code else "✗"))
+            self.employee_table.setItem(row, 4, QTableWidgetItem("✓" if emp.face_image else "✗"))
             
             # Action buttons
             action_widget = QWidget()
             action_layout = QHBoxLayout()
             action_layout.setContentsMargins(2, 2, 2, 2)
+            
+            # Profile button
+            profile_btn = QPushButton("Profile")
+            profile_btn.setToolTip("View/Edit Employee Profile")
+            profile_btn.clicked.connect(lambda checked, eid=emp.employee_id: self.view_profile(eid))
+            action_layout.addWidget(profile_btn)
             
             # Generate QR button
             qr_btn = QPushButton("QR")
@@ -213,7 +473,7 @@ class AdminInterface(QWidget):
             action_layout.addWidget(toggle_btn)
             
             action_widget.setLayout(action_layout)
-            self.employee_table.setCellWidget(row, 4, action_widget)
+            self.employee_table.setCellWidget(row, 5, action_widget)
     
     def generate_qr(self, employee_id):
         """Generate and save QR code for employee"""

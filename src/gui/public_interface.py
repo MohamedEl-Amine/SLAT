@@ -247,16 +247,17 @@ class PublicInterface(QWidget):
         self.layout.addItem(QSpacerItem(20, 20, QSizePolicy.Minimum, QSizePolicy.Expanding))
 
         # Footer hint
-        footer = QLabel("Admin Access: Press and hold F12 for 3 seconds")
+        footer = QLabel("Admin Access: Press F11 5 times")
         footer.setFont(QFont("Arial", 10))
         footer.setAlignment(Qt.AlignCenter)
         footer.setStyleSheet("color: #95A5A6;")
         self.layout.addWidget(footer)
 
         # Admin access (hidden)
-        self.admin_timer = QTimer()
-        self.admin_timer.setSingleShot(True)
-        self.admin_timer.timeout.connect(self.show_admin_prompt)
+        self.f11_press_count = 0
+        self.f11_reset_timer = QTimer()
+        self.f11_reset_timer.setSingleShot(True)
+        self.f11_reset_timer.timeout.connect(self.reset_f11_count)
 
         # Initialize idle timer to clear messages and input
         self.idle_timer = QTimer()
@@ -477,14 +478,23 @@ class PublicInterface(QWidget):
 
     def keyPressEvent(self, event):
         """Handle keyboard events."""
-        if event.key() == Qt.Key_F12:  # Hidden key for admin
-            self.admin_timer.start(3000)  # Hold for 3 seconds
+        if event.key() == Qt.Key_F11:  # Hidden key for admin
+            self.f11_press_count += 1
+            self.f11_reset_timer.start(2000)  # Reset count after 2 seconds of no presses
+            
+            if self.f11_press_count >= 5:
+                self.reset_f11_count()
+                self.show_admin_prompt()
         elif event.key() == Qt.Key_Escape:
             # Allow ESC to clear input and return to method selection
             self.reset_interface()
         else:
-            self.admin_timer.stop()
             super().keyPressEvent(event)
+
+    def reset_f11_count(self):
+        """Reset the F11 press count."""
+        self.f11_press_count = 0
+        self.f11_reset_timer.stop()
 
     def show_admin_prompt(self):
         """Prompt for admin password."""
