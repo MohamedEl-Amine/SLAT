@@ -90,7 +90,8 @@ class Database:
                 ('admin_password', hashlib.sha256('admin'.encode()).hexdigest()),
                 ('card_enabled', '1'),
                 ('qr_enabled', '0'),
-                ('face_enabled', '0')
+                ('face_enabled', '0'),
+                ('attendance_mode', 'qr')  # qr, face, or card
             ]
 
             for key, value in default_settings:

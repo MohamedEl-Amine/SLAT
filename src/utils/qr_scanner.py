@@ -11,6 +11,19 @@ class QRScanner:
     def __init__(self):
         self.camera_index = 0
 
+    def scan_frame(self, frame) -> Optional[str]:
+        """
+        Scan a single frame for QR codes.
+        Returns decoded QR data or None if no QR found.
+        """
+        decoded_objects = decode(frame)
+        
+        for obj in decoded_objects:
+            if obj.type == 'QRCODE':
+                return obj.data.decode('utf-8')
+        
+        return None
+
     def scan_qr_code(self) -> Optional[str]:
         """
         Scan QR code from camera and return the decoded data.

@@ -13,13 +13,12 @@ import cv2
 import numpy as np
 from database import Database
 from utils.qr_scanner import QRScanner
-from utils.face_recognition import FaceRecognition
+from utils import face_recognition
 
 class PublicInterface(QWidget):
     def __init__(self):
         super().__init__()
         self.db = Database()
-        self.face_recognizer = FaceRecognition()
         self.setWindowTitle("SLAT - Terminal de Présence")
         self.showFullScreen()
         self.f11_press_count = 0
@@ -341,7 +340,6 @@ class PublicInterface(QWidget):
             # Try to recognize
             face_img = gray[y:y+h, x:x+w]
             face_img = cv2.resize(face_img, (150, 150))
-            face_img = cv2.equalizeHist(face_img)  # Normalize for matching
             
             # Get all employees with faces
             all_employees = self.db.get_all_employees()
@@ -350,7 +348,8 @@ class PublicInterface(QWidget):
             
             for emp in all_employees:
                 if emp.face_image:
-                    confidence = self.face_recognizer.match_face(emp.face_image, face_img)
+                    stored_face = np.frombuffer(emp.face_image, dtype=np.uint8).reshape(150, 150)
+                    confidence = face_recognition.match_face(face_img, stored_face)
                     if confidence > best_confidence and confidence >= 75:
                         best_confidence = confidence
                         best_match = emp
@@ -607,9 +606,9 @@ class PublicInterface(QWidget):
                 self.f11_reset_timer.start(2000)
             elif self.f11_press_count >= 5:
                 from gui.admin_interface import AdminInterface
-                self.admin_window = AdminInterface(self.db, self)
+                self.admin_window = AdminInterface(self.db)
                 self.admin_window.show()
-                self.hide()
+                self.close()
                 self.f11_press_count = 0
                 self.f11_reset_timer.stop()
         elif event.key() == Qt.Key_Escape:

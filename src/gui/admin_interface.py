@@ -392,6 +392,32 @@ class AdminInterface(QWidget):
 
         layout.addLayout(time_layout)
 
+        # Terminal Mode Selection
+        mode_layout = QVBoxLayout()
+        mode_layout.addWidget(QLabel("Mode du terminal de présence :"))
+        
+        mode_desc = QLabel("Le mode sélectionné détermine comment le terminal fonctionne.\n"
+                          "La caméra reste active et les employés n'ont qu'à se présenter.")
+        mode_desc.setWordWrap(True)
+        mode_desc.setStyleSheet("color: #7F8C8D; font-size: 11px; padding: 5px;")
+        mode_layout.addWidget(mode_desc)
+        
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("🔲 Scan QR Code", "qr")
+        self.mode_combo.addItem("👤 Reconnaissance Faciale", "face")
+        self.mode_combo.addItem("🔢 Saisie Carte ID", "card")
+        
+        current_mode = self.db.get_setting('attendance_mode')
+        if current_mode == 'qr':
+            self.mode_combo.setCurrentIndex(0)
+        elif current_mode == 'face':
+            self.mode_combo.setCurrentIndex(1)
+        else:
+            self.mode_combo.setCurrentIndex(2)
+        
+        mode_layout.addWidget(self.mode_combo)
+        layout.addLayout(mode_layout)
+        
         # Identification Methods
         methods_layout = QVBoxLayout()
         methods_layout.addWidget(QLabel("Méthodes d'identification globales (disponibles pour tous les employés) :"))
@@ -589,12 +615,17 @@ class AdminInterface(QWidget):
         self.db.update_setting('afternoon_start', self.afternoon_start.time().toString('HH:mm'))
         self.db.update_setting('afternoon_end', self.afternoon_end.time().toString('HH:mm'))
 
+        # Save attendance mode
+        mode_data = self.mode_combo.currentData()
+        self.db.update_setting('attendance_mode', mode_data)
+
         # Save identification method settings
         self.db.update_setting('card_enabled', '1' if self.card_enabled.isChecked() else '0')
         self.db.update_setting('qr_enabled', '1' if self.qr_enabled.isChecked() else '0')
         self.db.update_setting('face_enabled', '1' if self.face_enabled.isChecked() else '0')
 
-        QMessageBox.information(self, "Succès", "Paramètres enregistrés avec succès.")
+        QMessageBox.information(self, "Succès", "Paramètres enregistrés avec succès.\n\n⚠ Redémarrez le terminal de présence pour appliquer le nouveau mode.")
+
 
     def export_logs(self):
         """Export logs to CSV file"""
