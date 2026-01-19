@@ -29,18 +29,46 @@ class QRScanner:
         Scan QR code from camera and return the decoded data.
         Returns None if no QR code found or camera error.
         """
-        cap = cv2.VideoCapture(self.camera_index)
-        if not cap.isOpened():
+        # Initialize camera with robust fallback
+        cap = None
+        for camera_index in [0, 1, 2]:
+            try:
+                cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+                
+                if cap.isOpened():
+                    # Test if we can actually read frames
+                    ret, test_frame = cap.read()
+                    if ret and test_frame is not None:
+                        print(f"Camera initialized successfully on index {camera_index} for QR scanning")
+                        break
+                    else:
+                        cap.release()
+                        cap = None
+                        continue
+                else:
+                    continue
+                    
+            except Exception as e:
+                print(f"Failed to initialize camera {camera_index} for QR scanning: {e}")
+                continue
+        
+        if cap is None or not cap.isOpened():
             return None
 
         start_time = time.time()
         timeout = 30  # 30 seconds timeout
+        consecutive_failures = 0
 
         try:
             while time.time() - start_time < timeout:
                 ret, frame = cap.read()
-                if not ret:
+                if not ret or frame is None:
+                    consecutive_failures += 1
+                    if consecutive_failures > 10:
+                        break
                     continue
+                
+                consecutive_failures = 0
 
                 # Decode QR codes in the frame
                 decoded_objects = decode(frame)
@@ -72,9 +100,26 @@ class QRScanner:
         return None
 
     def test_camera(self) -> bool:
-        """Test if camera is available."""
-        cap = cv2.VideoCapture(self.camera_index)
-        if cap.isOpened():
-            cap.release()
-            return True
+        """Test if camera is available with robust initialization."""
+        # Try different camera indices
+        for camera_index in [0, 1, 2]:
+            try:
+                cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+                
+                if cap.isOpened():
+                    # Test if we can actually read frames
+                    ret, test_frame = cap.read()
+                    if ret and test_frame is not None:
+                        cap.release()
+                        return True
+                    else:
+                        cap.release()
+                        continue
+                else:
+                    continue
+                    
+            except Exception as e:
+                print(f"Failed to test camera {camera_index}: {e}")
+                continue
+        
         return False

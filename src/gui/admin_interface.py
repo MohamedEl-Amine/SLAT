@@ -219,9 +219,11 @@ class EmployeeProfileDialog(QDialog):
                                "1. Positionnez votre visage face à la caméra\n"
                                "2. Assurez-vous d'être seul dans le cadre\n"
                                "3. Regardez directement la caméra\n"
-                               "4. Appuyez sur ESPACE quand le cadre devient vert\n"
-                               "5. Appuyez sur Q pour annuler\n\n"
-                               "Note : L'ancien profil facial sera remplacé.",
+                               "4. Attendez que la qualité soit excellente (>80%)\n"
+                               "5. Appuyez sur ESPACE pour capturer\n"
+                               "6. Appuyez sur Q pour annuler\n\n"
+                               "Conseil : Bon éclairage = meilleure reconnaissance\n"
+                               "L'ancien profil facial sera remplacé.",
                                QMessageBox.Ok)
         
         # Capture face with quality validation
@@ -332,19 +334,34 @@ class AdminInterface(QWidget):
 
         # Add Employee Section
         add_layout = QHBoxLayout()
-        add_layout.addWidget(QLabel("ID employé :"))
-        self.emp_id_input = QLineEdit()
-        add_layout.addWidget(self.emp_id_input)
-
-        add_layout.addWidget(QLabel("Nom :"))
+        
+        add_layout.addWidget(QLabel("Nom complet :"))
         self.emp_name_input = QLineEdit()
+        self.emp_name_input.setPlaceholderText("Ex: Mohamed El-Amine")
         add_layout.addWidget(self.emp_name_input)
 
-        add_btn = QPushButton("Ajouter employé")
+        add_btn = QPushButton("➕ Ajouter employé")
+        add_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27AE60;
+                color: white;
+                padding: 8px 16px;
+                font-weight: bold;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+        """)
         add_btn.clicked.connect(self.add_employee)
         add_layout.addWidget(add_btn)
 
         layout.addLayout(add_layout)
+        
+        # Info label
+        info_label = QLabel("💡 L'ID employé sera généré automatiquement (Format: FP-XXXXXX)")
+        info_label.setStyleSheet("color: #7F8C8D; font-size: 11px; padding: 5px;")
+        layout.addWidget(info_label)
 
         # Employee List
         self.employee_table = QTableWidget()
@@ -418,6 +435,22 @@ class AdminInterface(QWidget):
         mode_layout.addWidget(self.mode_combo)
         layout.addLayout(mode_layout)
         
+        # Camera Test Section
+        camera_layout = QVBoxLayout()
+        camera_layout.addWidget(QLabel("Test de caméra :"))
+        
+        camera_desc = QLabel("Vérifiez que la caméra fonctionne correctement avant de sélectionner\n"
+                           "les modes QR ou Reconnaissance Faciale.")
+        camera_desc.setWordWrap(True)
+        camera_desc.setStyleSheet("color: #7F8C8D; font-size: 11px; padding: 5px;")
+        camera_layout.addWidget(camera_desc)
+        
+        test_camera_btn = QPushButton("📷 Tester la caméra")
+        test_camera_btn.clicked.connect(self.test_camera)
+        camera_layout.addWidget(test_camera_btn)
+        
+        layout.addLayout(camera_layout)
+        
         # Identification Methods
         methods_layout = QVBoxLayout()
         methods_layout.addWidget(QLabel("Méthodes d'identification globales (disponibles pour tous les employés) :"))
@@ -465,24 +498,40 @@ class AdminInterface(QWidget):
         layout.addLayout(button_layout)
 
     def add_employee(self):
-        emp_id = self.emp_id_input.text().strip()
         name = self.emp_name_input.text().strip()
         
-        if not emp_id or not name:
-            QMessageBox.warning(self, "Erreur", "Veuillez saisir l'ID et le nom.")
+        if not name:
+            QMessageBox.warning(self, "Erreur", "Veuillez saisir le nom de l'employé.")
             return
+        
+        # Generate professional employee ID
+        emp_id = self.generate_employee_id()
         
         # Add to database
         success = self.db.add_employee(emp_id, name)
         if success:
-            QMessageBox.information(self, "Succès", f"Employé {name} ajouté avec succès.")
-            self.emp_id_input.clear()
+            QMessageBox.information(self, "Succès", 
+                                   f"✓ Employé ajouté avec succès!\n\n"
+                                   f"Nom: {name}\n"
+                                   f"ID: {emp_id}\n\n"
+                                   f"Vous pouvez maintenant configurer le QR code et le visage.")
             self.emp_name_input.clear()
             self.load_employees()
         else:
-            QMessageBox.warning(self, "Erreur", f"L'ID employé {emp_id} existe déjà.")
-            self.emp_name_input.clear()
-            self.load_employees()
+            QMessageBox.warning(self, "Erreur", "Échec de l'ajout de l'employé.")
+
+    def generate_employee_id(self):
+        """Generate a unique professional employee ID in format FP-XXXXXX"""
+        import random
+        
+        while True:
+            # Generate 6-digit number
+            number = random.randint(100000, 999999)
+            emp_id = f"FP-{number}"
+            
+            # Check if ID already exists
+            if not self.db.get_employee(emp_id):
+                return emp_id
 
     def view_profile(self, employee_id):
         """Open employee profile dialog"""
@@ -560,8 +609,10 @@ class AdminInterface(QWidget):
                                f"📷 Enregistrement facial pour {emp.name}\n\n"
                                "Instructions :\n"
                                "1. Positionnez-vous face à la caméra\n"
-                               "2. Appuyez sur ESPACE pour capturer\n"
-                               "3. Appuyez sur Q pour annuler",
+                               "2. Bon éclairage requis\n"
+                               "3. Attendez qualité >80%\n"
+                               "4. Appuyez sur ESPACE pour capturer\n"
+                               "5. Appuyez sur Q pour annuler",
                                QMessageBox.Ok)
         
         # Capture face
@@ -626,6 +677,43 @@ class AdminInterface(QWidget):
 
         QMessageBox.information(self, "Succès", "Paramètres enregistrés avec succès.\n\n⚠ Redémarrez le terminal de présence pour appliquer le nouveau mode.")
 
+    def test_camera(self):
+        """Test camera availability with robust initialization"""
+        import cv2
+        
+        # Try different camera indices
+        for camera_index in [0, 1, 2]:
+            try:
+                cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+                
+                if cap.isOpened():
+                    # Test if we can actually read frames
+                    ret, test_frame = cap.read()
+                    if ret and test_frame is not None:
+                        cap.release()
+                        QMessageBox.information(self, "Test caméra réussi", 
+                                              f"✅ Caméra détectée sur l'index {camera_index}\n\n"
+                                              f"Résolution: {test_frame.shape[1]}x{test_frame.shape[0]}\n\n"
+                                              f"Le mode QR et Reconnaissance Faciale devraient fonctionner.")
+                        return
+                    else:
+                        cap.release()
+                        continue
+                else:
+                    continue
+                    
+            except Exception as e:
+                print(f"Failed to initialize camera {camera_index}: {e}")
+                continue
+        
+        # If all cameras failed
+        QMessageBox.warning(self, "Test caméra échoué", 
+                          "❌ Aucune caméra détectée\n\n"
+                          "Vérifiez que :\n"
+                          "• La caméra est connectée\n"
+                          "• Les pilotes sont installés\n"
+                          "• L'application a les permissions caméra\n\n"
+                          "Seul le mode Carte ID sera disponible.")
 
     def export_logs(self):
         """Export logs to CSV file"""

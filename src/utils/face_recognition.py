@@ -14,121 +14,206 @@ class FaceRecognition:
         self.face_size = (150, 150)  # Increased size for better accuracy
 
     def test_camera(self) -> bool:
-        """Test if camera is available."""
-        cap = cv2.VideoCapture(0)
-        if cap.isOpened():
-            cap.release()
-            return True
+        """Test if camera is available with robust initialization."""
+        # Try different camera indices
+        for camera_index in [0, 1, 2]:
+            try:
+                cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+                
+                if cap.isOpened():
+                    # Test if we can actually read frames
+                    ret, test_frame = cap.read()
+                    if ret and test_frame is not None:
+                        cap.release()
+                        return True
+                    else:
+                        cap.release()
+                        continue
+                else:
+                    continue
+                    
+            except Exception as e:
+                print(f"Failed to test camera {camera_index}: {e}")
+                continue
+        
         return False
 
     def capture_face_for_enrollment(self) -> Optional[Tuple[np.ndarray, str]]:
-        """Capture a face for enrollment with quality validation.
+        """Fast and reliable face enrollment with automatic capture.
         Returns: (face_data, status_message) or (None, error_message)
         """
-        cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
+        # Initialize camera
+        cap = None
+        for camera_index in [0, 1, 2]:
+            try:
+                cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+                if cap.isOpened():
+                    ret, _ = cap.read()
+                    if ret:
+                        break
+                cap.release()
+                cap = None
+            except:
+                continue
+        
+        if cap is None:
             return None, "Aucune caméra détectée"
 
-        captured_face = None
-        message = "Positionnez votre visage face à la caméra"
+        # Optimize settings
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cap.set(cv2.CAP_PROP_FPS, 30)
+
+        best_face = None
+        best_quality = 0
+        countdown = 0
+        frame_skip = 0
         
         while True:
             ret, frame = cap.read()
             if not ret:
-                break
-
-            # Convert to grayscale for detection
+                continue
+            
+            frame_skip += 1
+            
+            # Process every 2nd frame for performance
+            if frame_skip % 2 != 0:
+                cv2.imshow('Enregistrement - Q pour quitter', frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+                continue
+            
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             
-            # Detect faces
+            # Simple, fast detection
             faces = self.face_cascade.detectMultiScale(
-                gray, 
-                scaleFactor=1.1, 
-                minNeighbors=5, 
-                minSize=(100, 100)
+                gray,
+                scaleFactor=1.2,      # Faster, less sensitive
+                minNeighbors=7,        # Stricter to avoid false positives
+                minSize=(100, 100),
+                maxSize=(400, 400)     # Limit max size
             )
-
-            # Validate detection
+            
+            status = ""
+            color = (255, 255, 255)
+            
             if len(faces) == 0:
-                message = "Aucun visage détecté"
-                cv2.putText(frame, message, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                status = "Aucun visage - Approchez-vous"
+                color = (0, 0, 255)
+                countdown = 0
+                
             elif len(faces) > 1:
-                message = "Plusieurs visages détectés - Une seule personne SVP"
-                cv2.putText(frame, message, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                # Draw rectangles around all faces
+                status = "Trop de visages detectes"
+                color = (0, 0, 255)
+                countdown = 0
+                # Draw all detected faces
                 for (x, y, w, h) in faces:
                     cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 0, 255), 2)
-            elif len(faces) == 1:
-                x, y, w, h = faces[0]
-                
-                # Validate face quality
-                face_roi_gray = gray[y:y+h, x:x+w]
-                face_roi_color = frame[y:y+h, x:x+w]
-                
-                # Check if face is frontal by detecting eyes
-                eyes = self.eye_cascade.detectMultiScale(face_roi_gray, scaleFactor=1.1, minNeighbors=3)
-                
-                if len(eyes) < 2:
-                    message = "Visage de face requis - Regardez la caméra"
-                    cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 165, 255), 2)
-                    cv2.putText(frame, message, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
-                else:
-                    # Good quality face detected
-                    message = "Visage détecté - Appuyez sur ESPACE pour capturer"
-                    cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                    cv2.putText(frame, message, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                     
-                    # Draw eye indicators
-                    for (ex, ey, ew, eh) in eyes[:2]:
-                        cv2.circle(frame, (x+ex+ew//2, y+ey+eh//2), 5, (0, 255, 0), 2)
-
-            cv2.imshow('Enregistrement facial - Q pour annuler', frame)
-            
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord(' ') and len(faces) == 1:
-                # Capture the face
+            else:
                 x, y, w, h = faces[0]
                 face_roi = gray[y:y+h, x:x+w]
                 
-                # Check quality again before capture
-                eyes = self.eye_cascade.detectMultiScale(face_roi, scaleFactor=1.1, minNeighbors=3)
-                if len(eyes) >= 2:
-                    # Resize to standard size and normalize
-                    face_resized = cv2.resize(face_roi, self.face_size)
-                    # Apply histogram equalization for better recognition
-                    face_normalized = cv2.equalizeHist(face_resized)
-                    captured_face = face_normalized
-                    message = "Visage capturé avec succès"
-                    break
+                # Simple quality check - sharpness only
+                laplacian = cv2.Laplacian(face_roi, cv2.CV_64F).var()
+                
+                if laplacian > 80:
+                    quality = min(100, int(laplacian / 2))
+                    color = (0, 255, 0)
+                    status = f"BON - Maintien position ({countdown}/20)"
+                    countdown += 1
+                    
+                    # Update best
+                    if quality > best_quality:
+                        best_quality = quality
+                        best_face = cv2.resize(face_roi, self.face_size)
+                        best_face = cv2.equalizeHist(best_face)
+                    
+                    # Auto-capture after 20 frames (~0.7s)
+                    if countdown >= 20:
+                        status = "CAPTURE REUSSIE!"
+                        cv2.rectangle(frame, (x, y), (x+w, y+h), color, 3)
+                        cv2.putText(frame, status, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+                        cv2.imshow('Enregistrement - Q pour quitter', frame)
+                        cv2.waitKey(1000)
+                        break
                 else:
-                    message = "Qualité insuffisante - Veuillez regarder la caméra"
-            elif key == ord('q') or key == 27:  # q or ESC
-                message = "Capture annulée"
+                    color = (0, 165, 255)
+                    status = "Restez immobile"
+                    countdown = max(0, countdown - 1)
+                
+                # Draw face box
+                cv2.rectangle(frame, (x, y), (x+w, y+h), color, 3)
+                
+                # Progress bar
+                if countdown > 0:
+                    bar_w = int((countdown / 20) * 400)
+                    cv2.rectangle(frame, (120, 60), (520, 80), (50, 50, 50), -1)
+                    cv2.rectangle(frame, (120, 60), (120 + bar_w, 80), color, -1)
+            
+            # Display status
+            cv2.putText(frame, status, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+            
+            cv2.imshow('Enregistrement - Q pour quitter', frame)
+            
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                break
+            elif key == ord(' ') and best_face is not None:
                 break
 
         cap.release()
         cv2.destroyAllWindows()
         
-        if captured_face is not None:
-            return captured_face, "Succès"
+        if best_face is not None:
+            return best_face, "Succès"
         else:
-            return None, message
+            return None, "Échec de capture"
 
     def capture_face_for_recognition(self) -> Optional[Tuple[np.ndarray, np.ndarray]]:
         """Capture a face for recognition in real-time.
         Returns: (face_data, raw_frame) or (None, None)
         """
-        cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
+        # Initialize camera with robust fallback
+        cap = None
+        for camera_index in [0, 1, 2]:
+            try:
+                cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+                
+                if cap.isOpened():
+                    # Test if we can actually read frames
+                    ret, test_frame = cap.read()
+                    if ret and test_frame is not None:
+                        print(f"Camera initialized successfully on index {camera_index} for recognition")
+                        break
+                    else:
+                        cap.release()
+                        cap = None
+                        continue
+                else:
+                    continue
+                    
+            except Exception as e:
+                print(f"Failed to initialize camera {camera_index} for recognition: {e}")
+                continue
+        
+        if cap is None or not cap.isOpened():
             return None, None
 
         captured_face = None
         raw_frame = None
+        consecutive_failures = 0
         
         while True:
             ret, frame = cap.read()
-            if not ret:
-                break
+            if not ret or frame is None:
+                consecutive_failures += 1
+                if consecutive_failures > 5:
+                    cap.release()
+                    return None, None
+                continue
+            
+            consecutive_failures = 0
 
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(100, 100))

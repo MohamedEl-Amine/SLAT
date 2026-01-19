@@ -342,18 +342,47 @@ class PublicInterface(QWidget):
             self.camera_timer.stop()
         self.clear_status()
 
+    def initialize_camera(self):
+        """Initialize camera with fallback options"""
+        # Try different camera indices
+        for camera_index in [0, 1, 2]:
+            try:
+                self.camera = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)  # Use DirectShow backend
+                
+                if self.camera.isOpened():
+                    # Test if we can actually read frames
+                    ret, test_frame = self.camera.read()
+                    if ret and test_frame is not None:
+                        print(f"Camera initialized successfully on index {camera_index}")
+                        return True
+                    else:
+                        self.camera.release()
+                        continue
+                else:
+                    continue
+                    
+            except Exception as e:
+                print(f"Failed to initialize camera {camera_index}: {e}")
+                continue
+        
+        # If all cameras failed, show error
+        self.camera = None
+        return False
+
     def start_qr_mode(self):
         """Start QR scanning mode"""
         self.mode_label.setText("🔲 MODE SCAN QR")
         self.camera_label.show()
         self.id_container.hide()
         
-        # Start camera
-        self.camera = cv2.VideoCapture(0)
-        if self.camera.isOpened():
+        # Start camera with error handling
+        if self.initialize_camera():
             self.camera_timer.start(30)  # ~33 FPS
+            self.show_status("📷 Caméra initialisée - Présentez votre QR code", "info", auto_clear=True)
         else:
-            self.show_status("❌ Erreur caméra", "error")
+            self.show_status("❌ Erreur caméra - Vérifiez la connexion\n\nUtilisez le mode Carte ID", "error")
+            # Auto-switch to card mode after 5 seconds
+            QTimer.singleShot(5000, lambda: self.switch_to_next_method())
 
     def start_face_mode(self):
         """Start face recognition mode"""
@@ -361,12 +390,14 @@ class PublicInterface(QWidget):
         self.camera_label.show()
         self.id_container.hide()
         
-        # Start camera
-        self.camera = cv2.VideoCapture(0)
-        if self.camera.isOpened():
+        # Start camera with error handling
+        if self.initialize_camera():
             self.camera_timer.start(30)
+            self.show_status("📷 Caméra initialisée - Regardez la caméra", "info", auto_clear=True)
         else:
-            self.show_status("❌ Erreur caméra", "error")
+            self.show_status("❌ Erreur caméra - Vérifiez la connexion\n\nUtilisez le mode Carte ID", "error")
+            # Auto-switch to card mode after 5 seconds
+            QTimer.singleShot(5000, lambda: self.switch_to_next_method())
 
     def start_card_mode(self):
         """Start ID card input mode"""
@@ -378,10 +409,40 @@ class PublicInterface(QWidget):
     def process_camera_frame(self):
         """Process camera frames for QR or Face detection"""
         if not self.camera or not self.camera.isOpened():
-            return
+            # Try to reinitialize camera
+            if self.initialize_camera():
+                self.show_status("📷 Caméra reconnectée", "info", auto_clear=True)
+            else:
+                # Show error message on camera label
+                error_pixmap = QPixmap(640, 480)
+                error_pixmap.fill(Qt.black)
+                painter = QPainter(error_pixmap)
+                painter.setPen(QPen(Qt.white, 2))
+                painter.setFont(QFont("Arial", 16))
+                painter.drawText(error_pixmap.rect(), Qt.AlignCenter, 
+                               "❌ ERREUR CAMÉRA\n\nVérifiez la connexion\n\nUtilisez le mode Carte ID")
+                painter.end()
+                self.camera_label.setPixmap(error_pixmap)
+                return
         
-        ret, frame = self.camera.read()
-        if not ret:
+        try:
+            ret, frame = self.camera.read()
+            if not ret or frame is None:
+                # Camera read failed, try to reinitialize
+                self.camera.release()
+                self.camera = None
+                print("Camera read failed, attempting to reinitialize...")
+                if self.initialize_camera():
+                    self.show_status("📷 Caméra reconnectée", "info", auto_clear=True)
+                return
+        except Exception as e:
+            print(f"Camera read error: {e}")
+            # Try to reinitialize
+            if self.camera:
+                self.camera.release()
+            self.camera = None
+            if self.initialize_camera():
+                self.show_status("📷 Caméra reconnectée après erreur", "info", auto_clear=True)
             return
         
         # Check cooldown
@@ -421,24 +482,27 @@ class PublicInterface(QWidget):
             self.display_frame(frame)
 
     def process_face_frame(self, frame):
-        """Detect and process faces"""
-        # Detect face
+        """Detect and process faces with optimized parameters"""
+        # Detect face with same parameters as enrollment
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+        
+        # Use same detection parameters as enrollment for consistency
+        faces = face_cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.2,
+            minNeighbors=7,
+            minSize=(100, 100),
+            maxSize=(400, 400)
+        )
         
         if len(faces) == 1:
             x, y, w, h = faces[0]
-            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-            cv2.putText(frame, "VISAGE DETECTE", (50, 50), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
             
-            self.display_frame(frame)
-            
-            # Try to recognize
+            # Extract and normalize face
             face_img = gray[y:y+h, x:x+w]
             face_img = cv2.resize(face_img, (150, 150))
-            face_img = cv2.equalizeHist(face_img)  # Normalize for matching
+            face_img = cv2.equalizeHist(face_img)
             
             # Get all employees with faces
             all_employees = self.db.get_all_employees()
@@ -447,22 +511,43 @@ class PublicInterface(QWidget):
             
             for emp in all_employees:
                 if emp.face_image:
-                    confidence = self.face_recognizer.match_face(emp.face_image, face_img)
-                    if confidence > best_confidence and confidence >= 75:
-                        best_confidence = confidence
-                        best_match = emp
+                    try:
+                        confidence = self.face_recognizer.match_face(emp.face_image, face_img)
+                        if confidence > best_confidence:
+                            best_confidence = confidence
+                            best_match = emp
+                    except Exception as e:
+                        print(f"Error matching face for {emp.name}: {e}")
+                        continue
             
-            if best_match:
+            # Draw rectangle and status
+            if best_match and best_confidence >= 70:
+                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 3)
+                cv2.putText(frame, f"{best_match.name}", (x, y-10), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                cv2.putText(frame, f"{best_confidence:.0f}%", (x, y+h+25), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                
+                self.display_frame(frame)
+                
+                # Process attendance
                 self.last_scan_time = datetime.datetime.now()
                 self.process_face_attendance(best_match.employee_id, best_confidence)
-        else:
-            if len(faces) == 0:
-                cv2.putText(frame, "Aucun visage detecte", (50, 50), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
             else:
-                cv2.putText(frame, "Plusieurs visages detectes", (50, 50), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
-            
+                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 165, 255), 2)
+                cv2.putText(frame, "Visage non reconnu", (50, 50), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
+                self.display_frame(frame)
+                
+        elif len(faces) == 0:
+            cv2.putText(frame, "Aucun visage", (50, 50), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+            self.display_frame(frame)
+        else:
+            cv2.putText(frame, "Plusieurs visages", (50, 50), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
+            for (x, y, w, h) in faces:
+                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 0, 255), 2)
             self.display_frame(frame)
 
     def display_frame(self, frame):
@@ -558,7 +643,8 @@ class PublicInterface(QWidget):
             return
 
         # Record attendance
-        self.db.add_attendance(employee.employee_id, action)
+        mode = self.db.get_setting('attendance_mode')
+        self.db.record_attendance(employee.employee_id, action, mode, "TERMINAL-01")
         
         # Show success
         success_msg = f"✓ {window_name}\n{now.strftime('%H:%M:%S')}"
