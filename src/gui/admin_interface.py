@@ -78,8 +78,8 @@ class EmployeeProfileDialog(QDialog):
         face_layout = QHBoxLayout()
         face_layout.addWidget(QLabel("Reconnaissance faciale :"))
         
-        self.face_status = QLabel("Non défini" if not self.employee.face_image else "Défini")
-        self.face_status.setStyleSheet("color: red;" if not self.employee.face_image else "color: green;")
+        self.face_status = QLabel("Non défini" if not self.employee.face_embedding else "Défini")
+        self.face_status.setStyleSheet("color: red;" if not self.employee.face_embedding else "color: green;")
         face_layout.addWidget(self.face_status)
         
         self.set_face_btn = QPushButton("Définir visage")
@@ -233,19 +233,19 @@ class EmployeeProfileDialog(QDialog):
             QMessageBox.warning(self, "Erreur", "Échec de la capture faciale.")
             return
             
-        face_data, message = result
+        face_embedding, message = result
         
-        if face_data is None:
+        if face_embedding is None:
             QMessageBox.warning(self, "Capture annulée", f"La capture faciale a été annulée.\n\n{message}")
             return
         
         try:
-            # Convert numpy array to bytes for storage
-            face_bytes = face_data.tobytes()
+            # Convert embedding numpy array to bytes for storage
+            embedding_bytes = face_embedding.tobytes()
             
             # Store in database
-            old_face_existed = self.employee.face_image is not None
-            self.db.update_employee_face(self.employee_id, face_bytes)
+            old_face_existed = self.employee.face_embedding is not None
+            self.db.update_employee_face(self.employee_id, embedding_bytes)
             
             # Log the action
             action_type = "redéfini" if old_face_existed else "défini"
@@ -550,7 +550,7 @@ class AdminInterface(QWidget):
             self.employee_table.setItem(row, 1, QTableWidgetItem(emp.name))
             self.employee_table.setItem(row, 2, QTableWidgetItem("Enabled" if emp.enabled else "Disabled"))
             self.employee_table.setItem(row, 3, QTableWidgetItem("✓" if emp.qr_code else "✗"))
-            self.employee_table.setItem(row, 4, QTableWidgetItem("✓" if emp.face_image else "✗"))
+            self.employee_table.setItem(row, 4, QTableWidgetItem("✓" if emp.face_embedding else "✗"))
             
             # Action buttons
             action_widget = QWidget()

@@ -323,41 +323,46 @@ class PublicInterface(QWidget):
             self.display_frame(frame)
 
     def process_face_frame(self, frame):
-        """Detect and process faces"""
-        # Detect face
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+        """Detect and process faces using RetinaFace and ArcFace"""
+        # Use the FaceRecognition class for consistent processing
+        captured_embedding, raw_frame = self.face_recognizer.capture_face_for_recognition()
         
-        if len(faces) == 1:
-            x, y, w, h = faces[0]
-            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-            cv2.putText(frame, "VISAGE DETECTE", (50, 50), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            
-            self.display_frame(frame)
-            
-            # Try to recognize
-            face_img = gray[y:y+h, x:x+w]
-            face_img = cv2.resize(face_img, (150, 150))
-            
+        if captured_embedding is not None and raw_frame is not None:
             # Get all employees with faces
             all_employees = self.db.get_all_employees()
             best_match = None
             best_confidence = 0
             
             for emp in all_employees:
-                if emp.face_image:
-                    stored_face = np.frombuffer(emp.face_image, dtype=np.uint8).reshape(150, 150)
-                    confidence = face_recognition.match_face(face_img, stored_face)
-                    if confidence > best_confidence and confidence >= 75:
-                        best_confidence = confidence
-                        best_match = emp
+                if emp.face_embedding:
+                    try:
+                        confidence = self.face_recognizer.match_face(emp.face_embedding, captured_embedding)
+                        if confidence > best_confidence:
+                            best_confidence = confidence
+                            best_match = emp
+                    except Exception as e:
+                        print(f"Error matching face for {emp.name}: {e}")
+                        continue
             
-            if best_match:
-                self.last_scan_time = datetime.datetime.now()
-                self.process_face_attendance(best_match.employee_id, best_confidence)
+            # Process the result
+            if best_match and self.face_recognizer.is_match_accepted(best_confidence):
+                self.handle_successful_face_recognition(best_match, best_confidence, raw_frame)
+            else:
+                # Show frame with status
+                if best_match:
+                    status = f"Confiance insuffisante: {best_confidence:.1f}%"
+                    color = (0, 165, 255)  # Orange
+                else:
+                    status = "Aucun employé reconnu"
+                    color = (0, 0, 255)  # Red
+                
+                cv2.putText(raw_frame, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                self.display_frame(raw_frame)
         else:
+            # No face detected or captured
+            cv2.putText(frame, "Positionnez votre visage face à la caméra", (10, 30), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
+            self.display_frame(frame)
             if len(faces) == 0:
                 cv2.putText(frame, "Aucun visage detecte", (50, 50), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
@@ -393,6 +398,20 @@ class PublicInterface(QWidget):
         
         # Check window and record
         self.record_attendance(employee)
+
+    def handle_successful_face_recognition(self, employee, confidence, frame):
+        """Handle successful face recognition"""
+        # Draw success indicators on frame
+        cv2.putText(frame, f"Reconnu: {employee.name}", (10, 30), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        cv2.putText(frame, f"Confiance: {confidence:.1f}%", (10, 60), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        
+        self.display_frame(frame)
+        
+        # Process attendance
+        self.last_scan_time = datetime.datetime.now()
+        self.process_face_attendance(employee.employee_id, confidence)
 
     def process_face_attendance(self, employee_id, confidence):
         """Process face recognition attendance"""

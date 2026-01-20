@@ -482,37 +482,20 @@ class PublicInterface(QWidget):
             self.display_frame(frame)
 
     def process_face_frame(self, frame):
-        """Detect and process faces with optimized parameters"""
-        # Detect face with same parameters as enrollment
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        """Detect and process faces using RetinaFace and ArcFace"""
+        # Use the FaceRecognition class for consistent processing
+        captured_embedding, raw_frame = self.face_recognizer.capture_face_for_recognition()
         
-        # Use same detection parameters as enrollment for consistency
-        faces = face_cascade.detectMultiScale(
-            gray,
-            scaleFactor=1.2,
-            minNeighbors=7,
-            minSize=(100, 100),
-            maxSize=(400, 400)
-        )
-        
-        if len(faces) == 1:
-            x, y, w, h = faces[0]
-            
-            # Extract and normalize face
-            face_img = gray[y:y+h, x:x+w]
-            face_img = cv2.resize(face_img, (150, 150))
-            face_img = cv2.equalizeHist(face_img)
-            
+        if captured_embedding is not None and raw_frame is not None:
             # Get all employees with faces
             all_employees = self.db.get_all_employees()
             best_match = None
             best_confidence = 0
             
             for emp in all_employees:
-                if emp.face_image:
+                if emp.face_embedding:
                     try:
-                        confidence = self.face_recognizer.match_face(emp.face_image, face_img)
+                        confidence = self.face_recognizer.match_face(emp.face_embedding, captured_embedding)
                         if confidence > best_confidence:
                             best_confidence = confidence
                             best_match = emp
@@ -520,9 +503,25 @@ class PublicInterface(QWidget):
                         print(f"Error matching face for {emp.name}: {e}")
                         continue
             
-            # Draw rectangle and status
-            if best_match and best_confidence >= 70:
-                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 3)
+            # Process the result
+            if best_match and self.face_recognizer.is_match_accepted(best_confidence):
+                self.handle_successful_face_recognition(best_match, best_confidence, raw_frame)
+            else:
+                # Show frame with status
+                if best_match:
+                    status = f"Confiance insuffisante: {best_confidence:.1f}%"
+                    color = (0, 165, 255)  # Orange
+                else:
+                    status = "Aucun employé reconnu"
+                    color = (0, 0, 255)  # Red
+                
+                cv2.putText(raw_frame, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                self.display_frame(raw_frame)
+        else:
+            # No face detected or captured
+            cv2.putText(frame, "Positionnez votre visage face à la caméra", (10, 30), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
+            self.display_frame(frame)
                 cv2.putText(frame, f"{best_match.name}", (x, y-10), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
                 cv2.putText(frame, f"{best_confidence:.0f}%", (x, y+h+25), 
@@ -576,6 +575,22 @@ class PublicInterface(QWidget):
         
         # Check window and record
         self.record_attendance(employee)
+
+    def handle_successful_face_recognition(self, employee, confidence, frame):
+        """Handle successful face recognition"""
+        # Draw success indicators on frame
+        # Note: Since we don't have face coordinates from the embedding approach,
+        # we'll just show the result without drawing rectangles
+        cv2.putText(frame, f"Reconnu: {employee.name}", (10, 30), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        cv2.putText(frame, f"Confiance: {confidence:.1f}%", (10, 60), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        
+        self.display_frame(frame)
+        
+        # Process attendance
+        self.last_scan_time = datetime.datetime.now()
+        self.process_face_attendance(employee.employee_id, confidence)
 
     def process_face_attendance(self, employee_id, confidence):
         """Process face recognition attendance"""
@@ -684,21 +699,9 @@ class PublicInterface(QWidget):
         return False, ""
 
     def show_employee_info(self, employee, message, status_type, auto_clear=False):
-        """Show employee info with photo"""
-        # Show photo if available
-        if employee.face_image:
-            face_array = np.frombuffer(employee.face_image, dtype=np.uint8).reshape(150, 150)
-            # Convert to RGB for display
-            face_rgb = cv2.cvtColor(face_array, cv2.COLOR_GRAY2RGB) if len(face_array.shape) == 2 else face_array
-            h, w = face_rgb.shape[:2]
-            bytes_per_line = 3 * w
-            qt_image = QImage(face_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
-            pixmap = QPixmap.fromImage(qt_image)
-            scaled_pixmap = pixmap.scaled(200, 200, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.employee_photo.setPixmap(scaled_pixmap)
-            self.employee_photo.show()
-        else:
-            self.employee_photo.hide()
+        """Show employee info (no photo display per compliance specs)"""
+        # Hide photo display since raw face images are not stored per compliance
+        self.employee_photo.hide()
         
         # Show name
         self.employee_name_label.setText(employee.name)

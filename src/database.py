@@ -11,13 +11,13 @@ import hashlib
 from models import Employee, AttendanceRecord
 
 class Employee:
-    def __init__(self, id, employee_id, name, enabled, qr_code, face_image, created_at):
+    def __init__(self, id, employee_id, name, enabled, qr_code, face_embedding, created_at):
         self.id = id
         self.employee_id = employee_id
         self.name = name
         self.enabled = enabled
         self.qr_code = qr_code
-        self.face_image = face_image
+        self.face_embedding = face_embedding
         self.created_at = created_at
 
 class Database:
@@ -27,6 +27,7 @@ class Database:
         self._ensure_data_dir()
         self.cipher = self._load_or_create_key()
         self._create_tables()
+        self._migrate_database()
 
     def _ensure_data_dir(self):
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
@@ -53,7 +54,7 @@ class Database:
                     name TEXT NOT NULL,
                     enabled BOOLEAN DEFAULT 1,
                     qr_code TEXT,
-                    face_image BLOB,
+                    face_embedding BLOB,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
@@ -99,6 +100,29 @@ class Database:
 
             conn.commit()
 
+    def _migrate_database(self):
+        """Migrate database schema for face recognition compliance"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            # Check if face_image column exists and face_embedding doesn't
+            cursor.execute("PRAGMA table_info(employees)")
+            columns = cursor.fetchall()
+            column_names = [col[1] for col in columns]
+
+            if 'face_image' in column_names and 'face_embedding' not in column_names:
+                print("Migrating database: face_image -> face_embedding")
+
+                # Rename face_image to face_embedding
+                cursor.execute("ALTER TABLE employees RENAME COLUMN face_image TO face_embedding")
+
+                # Note: In a real migration, you would need to convert existing face images to embeddings
+                # For now, we'll clear the face data since raw images are not allowed per specs
+                cursor.execute("UPDATE employees SET face_embedding = NULL WHERE face_embedding IS NOT NULL")
+
+                conn.commit()
+                print("Database migration completed")
+
     def get_setting(self, key):
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
@@ -119,7 +143,7 @@ class Database:
             row = cursor.fetchone()
             if row:
                 created_at = datetime.fromisoformat(row[6]) if row[6] else None
-                return Employee(id=row[0], employee_id=row[1], name=row[2], enabled=bool(row[3]), qr_code=row[4], face_image=row[5], created_at=created_at)
+                return Employee(id=row[0], employee_id=row[1], name=row[2], enabled=bool(row[3]), qr_code=row[4], face_embedding=row[5], created_at=created_at)
             return None
     
     def get_employee_by_qr(self, qr_code):
@@ -130,7 +154,7 @@ class Database:
             row = cursor.fetchone()
             if row:
                 created_at = datetime.fromisoformat(row[6]) if row[6] else None
-                return Employee(id=row[0], employee_id=row[1], name=row[2], enabled=bool(row[3]), qr_code=row[4], face_image=row[5], created_at=created_at)
+                return Employee(id=row[0], employee_id=row[1], name=row[2], enabled=bool(row[3]), qr_code=row[4], face_embedding=row[5], created_at=created_at)
             return None
 
     def record_attendance(self, employee_id, action, method_used, device_id, photo=None):
@@ -146,16 +170,16 @@ class Database:
             ''', (employee_id, action, timestamp, method_used, device_id, photo, integrity_hash))
             conn.commit()
 
-    def add_employee(self, employee_id, name, qr_code=None, face_image=None):
+    def add_employee(self, employee_id, name, qr_code=None, face_embedding=None):
         """Add a new employee to the database"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
             try:
                 cursor.execute('''
-                    INSERT INTO employees (employee_id, name, enabled, qr_code, face_image)
+                    INSERT INTO employees (employee_id, name, enabled, qr_code, face_embedding)
                     VALUES (?, ?, 1, ?, ?)
-                ''', (employee_id, name, qr_code, face_image))
+                ''', (employee_id, name, qr_code, face_embedding))
                 conn.commit()
                 return True
             except sqlite3.IntegrityError:
@@ -168,11 +192,11 @@ class Database:
             cursor.execute('UPDATE employees SET qr_code = ? WHERE employee_id = ?', (qr_code, employee_id))
             conn.commit()
     
-    def update_employee_face(self, employee_id, face_image):
-        """Update employee face image"""
+    def update_employee_face(self, employee_id, face_embedding):
+        """Update employee face embedding"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute('UPDATE employees SET face_image = ? WHERE employee_id = ?', (face_image, employee_id))
+            cursor.execute('UPDATE employees SET face_embedding = ? WHERE employee_id = ?', (face_embedding, employee_id))
             conn.commit()
     
     def generate_qr_code(self, employee_id):
@@ -211,7 +235,7 @@ class Database:
                     name=row[2], 
                     enabled=bool(row[3]), 
                     qr_code=row[4], 
-                    face_image=row[5], 
+                    face_embedding=row[5], 
                     created_at=created_at
                 ))
             return employees

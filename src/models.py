@@ -15,7 +15,7 @@ class Employee:
     id_method: str  # 'card', 'qr', 'face'
     pin_hash: Optional[str]
     qr_code: Optional[str]
-    face_data: Optional[bytes]
+    face_embedding: Optional[bytes]  # Biometric embedding vector (not raw image)
     created_at: Optional[datetime]
 
 @dataclass
