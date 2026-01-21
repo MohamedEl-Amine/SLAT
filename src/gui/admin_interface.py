@@ -480,7 +480,7 @@ class AdminInterface(QWidget):
         # Logs Table
         self.logs_table = QTableWidget()
         self.logs_table.setColumnCount(6)
-        self.logs_table.setHorizontalHeaderLabels(["ID Employé", "Nom", "Action", "Heure", "Méthode", "Appareil"])
+        self.logs_table.setHorizontalHeaderLabels(["ID Employé", "Nom", "Type", "Heure", "Méthode", "Terminal"])
         self.logs_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.logs_table.setEditTriggers(QTableWidget.NoEditTriggers)  # Make table readonly
         layout.addWidget(self.logs_table)
@@ -648,16 +648,20 @@ class AdminInterface(QWidget):
         self.logs_table.setRowCount(len(logs))
         
         for row, log in enumerate(logs):
-            # log structure: id, employee_id, action, timestamp, method_used, device_id, photo, integrity_hash
-            emp = self.db.get_employee(log[1])
+            # New schema: id, record_id, employee_id, terminal_id, timestamp, type, method, 
+            #            confidence, status, operator_id, correction_reason, replaces_record_id, 
+            #            photo_path, integrity_hash, created_at, modified_at
+            emp = self.db.get_employee(log[2])
             emp_name = emp.name if emp else "Unknown"
             
-            self.logs_table.setItem(row, 0, QTableWidgetItem(log[1]))  # employee_id
+            confidence_str = f"{log[7]:.1f}%" if log[7] is not None else "N/A"
+            
+            self.logs_table.setItem(row, 0, QTableWidgetItem(log[2]))  # employee_id
             self.logs_table.setItem(row, 1, QTableWidgetItem(emp_name))  # name
-            self.logs_table.setItem(row, 2, QTableWidgetItem(log[2]))  # action
-            self.logs_table.setItem(row, 3, QTableWidgetItem(str(log[3])))  # timestamp
-            self.logs_table.setItem(row, 4, QTableWidgetItem(log[4]))  # method_used
-            self.logs_table.setItem(row, 5, QTableWidgetItem(log[5] if log[5] else "N/A"))  # device_id
+            self.logs_table.setItem(row, 2, QTableWidgetItem(log[5]))  # type (IN/OUT)
+            self.logs_table.setItem(row, 3, QTableWidgetItem(str(log[4])))  # timestamp
+            self.logs_table.setItem(row, 4, QTableWidgetItem(log[6]))  # method
+            self.logs_table.setItem(row, 5, QTableWidgetItem(log[3] if log[3] else "N/A"))  # terminal_id
 
     def save_settings(self):
         # Save time windows
@@ -729,19 +733,27 @@ class AdminInterface(QWidget):
                 logs = self.db.get_all_logs()
                 with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
                     writer = csv.writer(csvfile)
-                    writer.writerow(['Employee ID', 'Name', 'Action', 'Timestamp', 'Method', 'Device ID', 'Integrity Hash'])
+                    writer.writerow(['Record ID', 'Employee ID', 'Name', 'Terminal ID', 'Timestamp', 
+                                   'Type', 'Method', 'Confidence', 'Status', 'Photo Path', 'Integrity Hash'])
                     
                     for log in logs:
-                        emp = self.db.get_employee(log[1])
+                        # New schema: id, record_id, employee_id, terminal_id, timestamp, type, method, 
+                        #            confidence, status, operator_id, correction_reason, replaces_record_id, 
+                        #            photo_path, integrity_hash, created_at, modified_at
+                        emp = self.db.get_employee(log[2])
                         emp_name = emp.name if emp else "Unknown"
                         writer.writerow([
-                            log[1],  # employee_id
+                            log[1],  # record_id
+                            log[2],  # employee_id
                             emp_name,
-                            log[2],  # action
-                            log[3],  # timestamp
-                            log[4],  # method_used
-                            log[5] if log[5] else "N/A",  # device_id
-                            log[7]   # integrity_hash
+                            log[3] if log[3] else "N/A",  # terminal_id
+                            log[4],  # timestamp
+                            log[5],  # type (IN/OUT)
+                            log[6],  # method
+                            log[7] if log[7] else "N/A",  # confidence
+                            log[8] if log[8] else "ACCEPTED",  # status
+                            log[12] if log[12] else "N/A",  # photo_path
+                            log[13]  # integrity_hash
                         ])
                 
                 QMessageBox.information(self, "Succès", f"Journaux exportés vers {filename}")

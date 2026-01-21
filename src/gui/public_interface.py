@@ -32,6 +32,11 @@ class PublicInterface(QWidget):
         self.camera_timer.timeout.connect(self.process_camera_frame)
         self.last_scan_time = None
         self.scan_cooldown = 3  # seconds between scans
+        self.current_frame = None  # Store current frame for photo capture
+        
+        # Create photos directory
+        self.photos_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'photos')
+        os.makedirs(self.photos_dir, exist_ok=True)
         
         # Set background color
         self.setAutoFillBackground(True)
@@ -445,6 +450,9 @@ class PublicInterface(QWidget):
                 self.show_status("📷 Caméra reconnectée après erreur", "info", auto_clear=True)
             return
         
+        # Store current frame for photo capture
+        self.current_frame = frame.copy()
+        
         # Check cooldown
         if self.last_scan_time:
             elapsed = (datetime.datetime.now() - self.last_scan_time).total_seconds()
@@ -474,7 +482,7 @@ class PublicInterface(QWidget):
             
             # Process attendance
             self.last_scan_time = datetime.datetime.now()
-            self.process_qr_attendance(qr_data)
+            self.process_qr_attendance(qr_data, frame)
         else:
             # Draw instruction
             cv2.putText(frame, "Presentez votre code QR", (50, 50), 
@@ -520,7 +528,7 @@ class PublicInterface(QWidget):
                 current_time = datetime.datetime.now()
                 if self.last_scan_time is None or (current_time - self.last_scan_time).seconds >= 3:
                     self.last_scan_time = current_time
-                    self.handle_successful_face_recognition(best_match, best_confidence, frame)
+                    self.handle_successful_face_recognition(best_match, best_confidence, frame.copy())
             else:
                 # Show frame with status
                 if best_match:
@@ -550,7 +558,7 @@ class PublicInterface(QWidget):
         scaled_pixmap = pixmap.scaled(self.camera_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.camera_label.setPixmap(scaled_pixmap)
 
-    def process_qr_attendance(self, qr_data):
+    def process_qr_attendance(self, qr_data, frame=None):
         """Process QR code attendance"""
         employee = self.db.get_employee_by_qr(qr_data)
         
@@ -563,7 +571,7 @@ class PublicInterface(QWidget):
             return
         
         # Check window and record
-        self.record_attendance(employee)
+        self.record_attendance(employee, frame=frame)
 
     def handle_successful_face_recognition(self, employee, confidence, frame):
         """Handle successful face recognition"""
@@ -579,9 +587,9 @@ class PublicInterface(QWidget):
         
         # Process attendance
         self.last_scan_time = datetime.datetime.now()
-        self.process_face_attendance(employee.employee_id, confidence)
+        self.process_face_attendance(employee.employee_id, confidence, frame)
 
-    def process_face_attendance(self, employee_id, confidence):
+    def process_face_attendance(self, employee_id, confidence, frame=None):
         """Process face recognition attendance"""
         employee = self.db.get_employee(employee_id)
         
@@ -594,7 +602,7 @@ class PublicInterface(QWidget):
             return
         
         # Check window and record
-        self.record_attendance(employee, extra_info=f"Confiance: {confidence:.0f}%")
+        self.record_attendance(employee, extra_info=f"Confiance: {confidence:.0f}%", frame=frame, confidence=confidence)
 
     def process_id_input(self):
         """Process ID card input"""
@@ -614,10 +622,35 @@ class PublicInterface(QWidget):
             self.show_status(f"❌ {employee.name}\nCompte désactivé", "error", auto_clear=True)
             return
         
-        # Check window and record
-        self.record_attendance(employee)
+        # Check window and record (use current frame from camera)
+        self.record_attendance(employee, frame=self.current_frame)
 
-    def record_attendance(self, employee, extra_info=""):
+    def save_checkpoint_photo(self, employee_id, action, frame):
+        """Save a photo of the checkpoint"""
+        if frame is None:
+            return None
+        
+        try:
+            # Create employee directory
+            employee_dir = os.path.join(self.photos_dir, str(employee_id))
+            os.makedirs(employee_dir, exist_ok=True)
+            
+            # Generate filename with timestamp
+            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            action_name = "arrival" if action == "IN" else "departure"
+            filename = f"{timestamp}_{action_name}.jpg"
+            filepath = os.path.join(employee_dir, filename)
+            
+            # Save the photo
+            cv2.imwrite(filepath, frame)
+            print(f"Checkpoint photo saved: {filepath}")
+            return filepath
+        
+        except Exception as e:
+            print(f"Error saving checkpoint photo: {e}")
+            return None
+    
+    def record_attendance(self, employee, extra_info="", frame=None, confidence=None):
         """Record attendance for employee"""
         now = datetime.datetime.now()
         current_time = now.time()
@@ -646,14 +679,26 @@ class PublicInterface(QWidget):
             self.show_status(f"❌ {employee.name}\n{dup_message}", "error", auto_clear=True)
             return
 
-        # Record attendance
+        # Save checkpoint photo
+        photo_path = self.save_checkpoint_photo(employee.employee_id, action, frame)
+        
+        # Record attendance with full audit trail
         mode = self.db.get_setting('attendance_mode')
-        self.db.record_attendance(employee.employee_id, action, mode, "TERMINAL-01")
+        record_id = self.db.record_attendance(
+            employee.employee_id, 
+            action, 
+            mode.upper(), 
+            "TERMINAL-01",
+            photo_path=photo_path,
+            confidence=confidence
+        )
         
         # Show success
         success_msg = f"✓ {window_name}\n{now.strftime('%H:%M:%S')}"
         if extra_info:
             success_msg += f"\n{extra_info}"
+        if photo_path:
+            success_msg += "\n📷 Photo enregistrée"
         
         self.show_employee_info(employee, success_msg, "success", auto_clear=True)
 
