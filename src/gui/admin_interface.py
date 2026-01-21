@@ -30,6 +30,7 @@ class EmployeeProfileDialog(QDialog):
             
         self.setWindowTitle(f"Profil employé - {self.employee.name}")
         self.setMinimumSize(700, 550)
+        self.resize(900, 650)  # Initial size, but resizable
         
         self.setup_ui()
         self.load_employee_data()
@@ -298,7 +299,8 @@ class AdminInterface(QWidget):
         self.db = db
         self.public = public
         self.setWindowTitle("SLAT - Panneau d'administration")
-        self.setFixedSize(1300, 700)
+        self.setMinimumSize(1300, 700)
+        self.resize(1300, 700)  # Initial size, but resizable
 
         self.layout = QVBoxLayout()
         self.setLayout(self.layout)
