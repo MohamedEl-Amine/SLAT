@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdi
 from PyQt5.QtCore import Qt, QTime, QDate
 from PyQt5.QtGui import QFont, QPixmap, QImage, QColor, QBrush
 import csv
+import sqlite3
 from datetime import datetime, timedelta
 from io import BytesIO
 import base64
@@ -581,6 +582,10 @@ class AdminInterface(QWidget):
         export_actions = self.create_export_actions()
         right_layout.addWidget(export_actions)
         
+        # PDF Daily Attendance Sheet Export
+        pdf_export_section = self.create_pdf_export_section()
+        right_layout.addWidget(pdf_export_section)
+        
         main_splitter.addWidget(right_widget)
         
         # Set initial splitter sizes (30% filter, 70% content)
@@ -916,6 +921,57 @@ class AdminInterface(QWidget):
         export_btn.clicked.connect(self.export_to_excel)
         layout.addWidget(export_btn)
         
+        group.setLayout(layout)
+        return group
+    
+    def create_pdf_export_section(self):
+        """Create PDF daily attendance sheet export section"""
+        group = QGroupBox("📄 Fiche de Présence PDF")
+        layout = QVBoxLayout()
+        
+        # Description
+        desc_label = QLabel("Exportez la fiche de présence journalière en PDF")
+        desc_label.setStyleSheet("color: #555; font-style: italic; margin-bottom: 10px;")
+        layout.addWidget(desc_label)
+        
+        # Date selector and export button in horizontal layout
+        h_layout = QHBoxLayout()
+        
+        date_label = QLabel("📅 Sélectionner le jour :")
+        date_label.setStyleSheet("font-weight: bold;")
+        h_layout.addWidget(date_label)
+        
+        self.pdf_export_date = QDateEdit()
+        self.pdf_export_date.setCalendarPopup(True)
+        from PyQt5.QtCore import QDate
+        self.pdf_export_date.setDate(QDate.currentDate())
+        self.pdf_export_date.setDisplayFormat("dd/MM/yyyy")
+        h_layout.addWidget(self.pdf_export_date)
+        
+        h_layout.addSpacing(20)
+        
+        # Export PDF button
+        export_pdf_btn = QPushButton("📥 Exporter Fiche de Présence PDF")
+        export_pdf_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #E74C3C;
+                color: white;
+                padding: 12px 25px;
+                font-size: 13px;
+                font-weight: bold;
+                border-radius: 5px;
+                min-width: 200px;
+            }
+            QPushButton:hover {
+                background-color: #C0392B;
+            }
+        """)
+        export_pdf_btn.clicked.connect(self.export_attendance_sheet_pdf)
+        h_layout.addWidget(export_pdf_btn)
+        
+        h_layout.addStretch()
+        
+        layout.addLayout(h_layout)
         group.setLayout(layout)
         return group
     
@@ -1267,6 +1323,167 @@ class AdminInterface(QWidget):
             
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Échec de l'exportation : {str(e)}")
+    
+    def export_attendance_sheet_pdf(self):
+        """Export daily attendance sheet to PDF (Fiche de Présence)"""
+        selected_date = self.pdf_export_date.date().toPyDate()
+        
+        # Get attendance records for the selected day
+        with sqlite3.connect(self.db.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT 
+                    e.name as employee_name,
+                    al.timestamp,
+                    al.type,
+                    al.method
+                FROM attendance_logs al
+                JOIN employees e ON al.employee_id = e.employee_id
+                WHERE DATE(al.timestamp) = ?
+                AND al.status = 'ACCEPTED'
+                ORDER BY e.name, al.timestamp
+            ''', (selected_date.strftime('%Y-%m-%d'),))
+            
+            records = cursor.fetchall()
+        
+        if not records:
+            QMessageBox.warning(self, "Attention", 
+                f"Aucune donnée de présence trouvée pour le {selected_date.strftime('%d/%m/%Y')}")
+            return
+        
+        # Group records by employee
+        from collections import defaultdict
+        employee_records = defaultdict(lambda: {'in': None, 'out': None})
+        
+        for name, timestamp, record_type, method in records:
+            timestamp_dt = datetime.fromisoformat(timestamp)
+            if record_type == 'IN' and employee_records[name]['in'] is None:
+                employee_records[name]['in'] = (timestamp_dt.strftime('%H:%M:%S'), method)
+            elif record_type == 'OUT':
+                employee_records[name]['out'] = (timestamp_dt.strftime('%H:%M:%S'), method)
+        
+        # Get filename
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exporter Fiche de Présence PDF",
+            f"fiche_presence_{selected_date.strftime('%Y%m%d')}.pdf",
+            "PDF Files (*.pdf)"
+        )
+        
+        if not filename:
+            return
+        
+        try:
+            from reportlab.lib import colors
+            from reportlab.lib.pagesizes import A4, landscape
+            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.units import cm
+            from reportlab.lib.enums import TA_CENTER
+            
+            # Create PDF
+            doc = SimpleDocTemplate(filename, pagesize=landscape(A4))
+            elements = []
+            styles = getSampleStyleSheet()
+            
+            # Title
+            title_style = ParagraphStyle(
+                'CustomTitle',
+                parent=styles['Heading1'],
+                fontSize=18,
+                textColor=colors.HexColor('#2C3E50'),
+                spaceAfter=30,
+                alignment=TA_CENTER,
+                fontName='Helvetica-Bold'
+            )
+            
+            title_text = f"FICHE DE PRÉSENCE<br/>{selected_date.strftime('%d/%m/%Y')}"
+            title = Paragraph(title_text, title_style)
+            elements.append(title)
+            elements.append(Spacer(1, 0.5*cm))
+            
+            # Table data
+            data = [['NOM EMPLOYÉ', 'H-D\'ENTRÉE', 'TYPE ENTRÉE', 'H-DE SORTIE', 'TYPE SORTIE']]
+            
+            for emp_name in sorted(employee_records.keys()):
+                record = employee_records[emp_name]
+                entry_time = record['in'][0] if record['in'] else '-'
+                entry_type = self.format_method_name(record['in'][1]) if record['in'] else '-'
+                exit_time = record['out'][0] if record['out'] else '-'
+                exit_type = self.format_method_name(record['out'][1]) if record['out'] else '-'
+                
+                data.append([
+                    emp_name,
+                    entry_time,
+                    entry_type,
+                    exit_time,
+                    exit_type
+                ])
+            
+            # Create table
+            table = Table(data, colWidths=[6*cm, 3*cm, 3*cm, 3*cm, 3*cm])
+            
+            # Style table
+            table.setStyle(TableStyle([
+                # Header
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3498DB')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('TOPPADDING', (0, 0), (-1, 0), 12),
+                
+                # Data rows
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 1), (-1, -1), 10),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#ECF0F1')]),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('TOPPADDING', (0, 1), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+            ]))
+            
+            elements.append(table)
+            
+            # Footer
+            elements.append(Spacer(1, 1*cm))
+            footer_style = ParagraphStyle(
+                'Footer',
+                parent=styles['Normal'],
+                fontSize=9,
+                textColor=colors.HexColor('#7F8C8D'),
+                alignment=TA_CENTER
+            )
+            footer_text = f"Document généré le {datetime.now().strftime('%d/%m/%Y à %H:%M')} - SLAT v1.0"
+            footer = Paragraph(footer_text, footer_style)
+            elements.append(footer)
+            
+            # Build PDF
+            doc.build(elements)
+            
+            # Show success message
+            QMessageBox.information(self, "Succès",
+                f"✅ Fiche de présence générée avec succès!\n\n"
+                f"📁 Fichier: {filename}\n"
+                f"📅 Date: {selected_date.strftime('%d/%m/%Y')}\n"
+                f"👥 Employés: {len(employee_records)}")
+            
+        except ImportError:
+            QMessageBox.critical(self, "Erreur", 
+                "La bibliothèque ReportLab n'est pas installée.\n\n"
+                "Installez-la avec: pip install reportlab")
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Échec de l'exportation PDF: {str(e)}")
+    
+    def format_method_name(self, method):
+        """Format method name for display"""
+        method_map = {
+            'FACE': '👤 VISAGE',
+            'QR': '📱 QR CODE',
+            'CARD': '💳 CARTE',
+            'MANUAL': '✍️ MANUEL'
+        }
+        return method_map.get(method, method)
     
     def load_employees_to_combo(self):
         """Load employees into single employee combo box"""
