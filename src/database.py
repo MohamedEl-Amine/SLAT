@@ -115,6 +115,8 @@ class Database:
                 ('morning_end', '09:00'),
                 ('afternoon_start', '16:00'),
                 ('afternoon_end', '16:30'),
+                ('official_start_time', '08:00'),  # Official work start time for lateness calculation
+                ('official_end_time', '17:00'),    # Official work end time for early leave calculation
                 ('admin_password', hashlib.sha256('admin'.encode()).hexdigest()),
                 ('card_enabled', '1'),
                 ('qr_enabled', '0'),
@@ -404,7 +406,8 @@ class Database:
                         daily_logs[date]['out'].append(log[2])
                 
                 # Calculate daily summaries
-                morning_start = datetime.strptime(self.get_setting('morning_start'), '%H:%M').time()
+                official_start = datetime.strptime(self.get_setting('official_start_time'), '%H:%M').time()
+                official_end = datetime.strptime(self.get_setting('official_end_time'), '%H:%M').time()
                 
                 for date, logs in daily_logs.items():
                     first_in = min(logs['in']) if logs['in'] else None
@@ -419,16 +422,26 @@ class Database:
                                                  datetime.strptime(last_out, '%H:%M:%S').time())
                         total_hours = (out_dt - in_dt).total_seconds() / 3600
                     
-                    # Calculate lateness
+                    # Calculate lateness based on official start time
                     late_minutes = 0
                     if first_in:
                         in_time = datetime.strptime(first_in, '%H:%M:%S').time()
-                        if in_time > morning_start:
+                        if in_time > official_start:
                             late_minutes = int((datetime.combine(datetime.min, in_time) - 
-                                              datetime.combine(datetime.min, morning_start)).total_seconds() / 60)
+                                              datetime.combine(datetime.min, official_start)).total_seconds() / 60)
                     
-                    # Calculate overtime (hours > 8)
-                    overtime = max(0, total_hours - 8)
+                    # Calculate early leave based on official end time
+                    early_leave_minutes = 0
+                    if last_out:
+                        out_time = datetime.strptime(last_out, '%H:%M:%S').time()
+                        if out_time < official_end:
+                            early_leave_minutes = int((datetime.combine(datetime.min, official_end) - 
+                                                     datetime.combine(datetime.min, out_time)).total_seconds() / 60)
+                    
+                    # Calculate overtime (hours beyond official end time)
+                    expected_hours = (datetime.combine(datetime.min, official_end) - 
+                                    datetime.combine(datetime.min, official_start)).total_seconds() / 3600
+                    overtime = max(0, total_hours - expected_hours)
                     
                     status = 'NORMAL' if first_in and last_out else 'EXCEPTION'
                     
@@ -441,6 +454,7 @@ class Database:
                         'total_hours': round(total_hours, 2),
                         'overtime': round(overtime, 2),
                         'late_minutes': late_minutes,
+                        'early_leave_minutes': early_leave_minutes,
                         'status': status
                     })
             
@@ -455,7 +469,7 @@ class Database:
         with open(filepath, 'w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=[
                 'employee_id', 'employee_name', 'date', 'first_in', 'last_out', 
-                'total_hours', 'overtime', 'late_minutes', 'status'
+                'total_hours', 'overtime', 'late_minutes', 'early_leave_minutes', 'status'
             ])
             writer.writeheader()
             writer.writerows(summaries)
@@ -479,7 +493,7 @@ class Database:
         
         # Headers
         headers = ['Employee ID', 'Name', 'Date', 'First In', 'Last Out', 
-                   'Total Hours', 'Overtime', 'Late (min)', 'Status']
+                   'Total Hours', 'Overtime', 'Late (min)', 'Early Leave (min)', 'Status']
         ws.append(headers)
         
         # Style headers
@@ -500,6 +514,7 @@ class Database:
                 summary['total_hours'],
                 summary['overtime'],
                 summary['late_minutes'],
+                summary['early_leave_minutes'],
                 summary['status']
             ])
         

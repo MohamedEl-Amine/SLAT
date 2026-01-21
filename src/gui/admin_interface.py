@@ -5,13 +5,15 @@ Admin interface for SLAT - Configuration and management.
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, 
                              QTableWidget, QTableWidgetItem, QTabWidget, QCheckBox, QMessageBox, 
                              QTimeEdit, QComboBox, QHeaderView, QFileDialog, QDialog, QFormLayout,
-                             QGroupBox, QTextEdit, QScrollArea, QFrame)
-from PyQt5.QtCore import Qt, QTime
-from PyQt5.QtGui import QFont, QPixmap, QImage, QPixmap, QImage
+                             QGroupBox, QTextEdit, QScrollArea, QFrame, QListWidget, QRadioButton,
+                             QButtonGroup, QDateEdit, QSpinBox, QSplitter)
+from PyQt5.QtCore import Qt, QTime, QDate
+from PyQt5.QtGui import QFont, QPixmap, QImage, QColor, QBrush
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import BytesIO
 import base64
+import calendar
 
 class EmployeeProfileDialog(QDialog):
     def __init__(self, db, employee_id):
@@ -295,7 +297,7 @@ class AdminInterface(QWidget):
         self.db = db
         self.public = public
         self.setWindowTitle("SLAT - Panneau d'administration")
-        self.setFixedSize(1000, 700)
+        self.setFixedSize(1600, 800)
 
         self.layout = QVBoxLayout()
         self.setLayout(self.layout)
@@ -318,6 +320,11 @@ class AdminInterface(QWidget):
         self.logs_tab = QWidget()
         self.setup_logs_tab()
         self.tabs.addTab(self.logs_tab, "Journaux présence")
+
+        # Export Filters Tab
+        self.export_tab = QWidget()
+        self.setup_export_tab()
+        self.tabs.addTab(self.export_tab, "Filtres d'export")
 
         # Logout button
         logout_btn = QPushButton("Déconnexion")
@@ -375,9 +382,11 @@ class AdminInterface(QWidget):
         layout = QVBoxLayout()
         self.settings_tab.setLayout(layout)
 
-        # Time Windows
+        # Time Windows Group
+        windows_group = QGroupBox("Fenêtres de pointage")
         time_layout = QVBoxLayout()
-        time_layout.addWidget(QLabel("Fenêtre matin :"))
+        
+        time_layout.addWidget(QLabel("Fenêtre matin (arrivée) :"))
 
         morning_layout = QHBoxLayout()
         morning_layout.addWidget(QLabel("Début :"))
@@ -392,7 +401,7 @@ class AdminInterface(QWidget):
 
         time_layout.addLayout(morning_layout)
 
-        time_layout.addWidget(QLabel("Fenêtre après-midi :"))
+        time_layout.addWidget(QLabel("Fenêtre après-midi (départ) :"))
 
         afternoon_layout = QHBoxLayout()
         afternoon_layout.addWidget(QLabel("Début :"))
@@ -400,14 +409,38 @@ class AdminInterface(QWidget):
         self.afternoon_start.setTime(QTime.fromString(self.db.get_setting('afternoon_start'), 'hh:mm'))
         afternoon_layout.addWidget(self.afternoon_start)
 
-        afternoon_layout.addWidget(QLabel("End:"))
+        afternoon_layout.addWidget(QLabel("Fin :"))
         self.afternoon_end = QTimeEdit()
         self.afternoon_end.setTime(QTime.fromString(self.db.get_setting('afternoon_end'), 'hh:mm'))
         afternoon_layout.addWidget(self.afternoon_end)
 
         time_layout.addLayout(afternoon_layout)
+        windows_group.setLayout(time_layout)
+        layout.addWidget(windows_group)
 
-        layout.addLayout(time_layout)
+        # Official Work Hours Group
+        official_group = QGroupBox("Horaires officiels de travail")
+        official_layout = QVBoxLayout()
+        
+        official_desc = QLabel("Ces horaires sont utilisés pour calculer les retards et départs anticipés.")
+        official_desc.setWordWrap(True)
+        official_desc.setStyleSheet("color: #7F8C8D; font-size: 11px; padding: 5px;")
+        official_layout.addWidget(official_desc)
+        
+        official_times_layout = QHBoxLayout()
+        official_times_layout.addWidget(QLabel("Heure d'arrivée officielle :"))
+        self.official_start_time = QTimeEdit()
+        self.official_start_time.setTime(QTime.fromString(self.db.get_setting('official_start_time'), 'hh:mm'))
+        official_times_layout.addWidget(self.official_start_time)
+        
+        official_times_layout.addWidget(QLabel("Heure de départ officielle :"))
+        self.official_end_time = QTimeEdit()
+        self.official_end_time.setTime(QTime.fromString(self.db.get_setting('official_end_time'), 'hh:mm'))
+        official_times_layout.addWidget(self.official_end_time)
+        
+        official_layout.addLayout(official_times_layout)
+        official_group.setLayout(official_layout)
+        layout.addWidget(official_group)
 
         # Terminal Mode Selection
         mode_layout = QVBoxLayout()
@@ -496,6 +529,1242 @@ class AdminInterface(QWidget):
         button_layout.addWidget(export_btn)
 
         layout.addLayout(button_layout)
+
+    def setup_export_tab(self):
+        """Setup the export tab with preview-first design"""
+        layout = QVBoxLayout()
+        self.export_tab.setLayout(layout)
+        
+        # Main horizontal splitter (Filter Panel | Preview + Export)
+        main_splitter = QSplitter(Qt.Horizontal)
+        
+        # === ZONE A: LEFT FILTER PANEL ===
+        filter_panel = self.create_filter_panel()
+        main_splitter.addWidget(filter_panel)
+        
+        # === ZONE B+C: RIGHT SIDE (Presets + Preview + Export) ===
+        right_widget = QWidget()
+        right_layout = QVBoxLayout()
+        right_widget.setLayout(right_layout)
+        
+        # Zone B: Preset Buttons
+        preset_group = self.create_preset_buttons()
+        right_layout.addWidget(preset_group)
+        
+        # Zone C: Preview Table
+        preview_group = self.create_preview_table()
+        right_layout.addWidget(preview_group, stretch=1)
+        
+        # Export Actions (bottom)
+        export_actions = self.create_export_actions()
+        right_layout.addWidget(export_actions)
+        
+        main_splitter.addWidget(right_widget)
+        
+        # Set initial splitter sizes (30% filter, 70% content)
+        main_splitter.setSizes([300, 700])
+        
+        layout.addWidget(main_splitter)
+        
+        # Load initial data (current month)
+        from PyQt5.QtCore import QTimer
+        QTimer.singleShot(100, self.set_filter_this_month)
+    
+    def create_filter_panel(self):
+        """Create collapsible filter panel (Zone A)"""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setMaximumWidth(350)
+        
+        panel = QWidget()
+        layout = QVBoxLayout()
+        panel.setLayout(layout)
+        
+        # Title
+        title = QLabel("🔍 Filtres")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; padding: 10px;")
+        layout.addWidget(title)
+        
+        # === PÉRIODE ===
+        from PyQt5.QtWidgets import QDateEdit, QListWidget, QRadioButton, QButtonGroup
+        from PyQt5.QtCore import QDate
+        
+        period_group = QGroupBox("📅 Période")
+        period_layout = QVBoxLayout()
+        
+        # Date inputs
+        date_form = QFormLayout()
+        self.filter_start_date = QDateEdit()
+        self.filter_start_date.setCalendarPopup(True)
+        self.filter_start_date.setDate(QDate.currentDate().addDays(-30))
+        date_form.addRow("Date de début :", self.filter_start_date)
+        
+        self.filter_end_date = QDateEdit()
+        self.filter_end_date.setCalendarPopup(True)
+        self.filter_end_date.setDate(QDate.currentDate())
+        date_form.addRow("Date de fin :", self.filter_end_date)
+        period_layout.addLayout(date_form)
+        
+        # Quick shortcuts
+        shortcuts_label = QLabel("Raccourcis :")
+        shortcuts_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        period_layout.addWidget(shortcuts_label)
+        
+        shortcut_layout = QHBoxLayout()
+        btn_this_month = QPushButton("Ce mois")
+        btn_this_month.clicked.connect(self.set_filter_this_month)
+        shortcut_layout.addWidget(btn_this_month)
+        
+        btn_this_week = QPushButton("Cette semaine")
+        btn_this_week.clicked.connect(self.set_filter_this_week)
+        shortcut_layout.addWidget(btn_this_week)
+        period_layout.addLayout(shortcut_layout)
+        
+        period_group.setLayout(period_layout)
+        layout.addWidget(period_group)
+        
+        # === EMPLOYÉ ===
+        employee_group = QGroupBox("👤 Employé")
+        employee_layout = QVBoxLayout()
+        
+        self.filter_employee_combo = QComboBox()
+        self.filter_employee_combo.addItem("Tous les employés", None)
+        employees = self.db.get_all_employees()
+        for emp in employees:
+            self.filter_employee_combo.addItem(f"{emp.name} ({emp.employee_id})", emp.employee_id)
+        employee_layout.addWidget(self.filter_employee_combo)
+        
+        employee_group.setLayout(employee_layout)
+        layout.addWidget(employee_group)
+        
+        # === TYPE DE SITUATION ===
+        situation_group = QGroupBox("📊 Type de situation")
+        situation_layout = QVBoxLayout()
+        
+        self.filter_retards = QCheckBox("Retards")
+        situation_layout.addWidget(self.filter_retards)
+        
+        self.filter_departs = QCheckBox("Départs anticipés")
+        situation_layout.addWidget(self.filter_departs)
+        
+        self.filter_absences = QCheckBox("Absences")
+        situation_layout.addWidget(self.filter_absences)
+        
+        self.filter_heures_sup = QCheckBox("Heures supplémentaires")
+        situation_layout.addWidget(self.filter_heures_sup)
+        
+        self.filter_incomplet = QCheckBox("Journées incomplètes")
+        situation_layout.addWidget(self.filter_incomplet)
+        
+        situation_group.setLayout(situation_layout)
+        layout.addWidget(situation_group)
+        
+        # === RÈGLES ===
+        rules_group = QGroupBox("⚙️ Règles")
+        rules_layout = QFormLayout()
+        
+        from PyQt5.QtWidgets import QSpinBox
+        self.filter_late_threshold = QSpinBox()
+        self.filter_late_threshold.setRange(1, 120)
+        self.filter_late_threshold.setValue(5)
+        self.filter_late_threshold.setSuffix(" min")
+        rules_layout.addRow("Retard >", self.filter_late_threshold)
+        
+        self.filter_early_threshold = QSpinBox()
+        self.filter_early_threshold.setRange(1, 120)
+        self.filter_early_threshold.setValue(10)
+        self.filter_early_threshold.setSuffix(" min")
+        rules_layout.addRow("Départ anticipé >", self.filter_early_threshold)
+        
+        self.filter_overtime_threshold = QSpinBox()
+        self.filter_overtime_threshold.setRange(1, 240)
+        self.filter_overtime_threshold.setValue(30)
+        self.filter_overtime_threshold.setSuffix(" min")
+        rules_layout.addRow("Heures sup >", self.filter_overtime_threshold)
+        
+        rules_group.setLayout(rules_layout)
+        layout.addWidget(rules_group)
+        
+        # === MÉTHODE ===
+        method_group = QGroupBox("🔐 Méthode")
+        method_layout = QVBoxLayout()
+        
+        self.filter_method_face = QCheckBox("Face")
+        method_layout.addWidget(self.filter_method_face)
+        
+        self.filter_method_card = QCheckBox("Carte")
+        method_layout.addWidget(self.filter_method_card)
+        
+        self.filter_method_manual = QCheckBox("Manuel")
+        method_layout.addWidget(self.filter_method_manual)
+        
+        method_group.setLayout(method_layout)
+        layout.addWidget(method_group)
+        
+        # === ACTIONS ===
+        action_layout = QVBoxLayout()
+        action_layout.addSpacing(10)
+        
+        apply_btn = QPushButton("✓ Appliquer filtres")
+        apply_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27AE60;
+                color: white;
+                padding: 10px;
+                font-weight: bold;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+        """)
+        apply_btn.clicked.connect(self.apply_filters_and_refresh)
+        action_layout.addWidget(apply_btn)
+        
+        reset_btn = QPushButton("↺ Réinitialiser")
+        reset_btn.clicked.connect(self.reset_and_refresh)
+        action_layout.addWidget(reset_btn)
+        
+        layout.addLayout(action_layout)
+        layout.addStretch()
+        
+        scroll.setWidget(panel)
+        return scroll
+    
+    def create_preset_buttons(self):
+        """Create preset buttons bar (Zone B)"""
+        group = QGroupBox()
+        layout = QVBoxLayout()
+        
+        title = QLabel("⚡ Raccourcis rapides")
+        title.setStyleSheet("font-size: 14px; font-weight: bold; padding: 5px;")
+        layout.addWidget(title)
+        
+        # Preset buttons grid
+        grid1 = QHBoxLayout()
+        
+        btn_all = QPushButton("📋 Toutes les présences")
+        btn_all.setStyleSheet(self.get_preset_button_style("#3498DB"))
+        btn_all.clicked.connect(lambda: self.apply_preset("all"))
+        grid1.addWidget(btn_all)
+        
+        btn_late = QPushButton("🕐 Retards du mois")
+        btn_late.setStyleSheet(self.get_preset_button_style("#E67E22"))
+        btn_late.clicked.connect(lambda: self.apply_preset("late"))
+        grid1.addWidget(btn_late)
+        
+        btn_early = QPushButton("🏃 Départs anticipés")
+        btn_early.setStyleSheet(self.get_preset_button_style("#9B59B6"))
+        btn_early.clicked.connect(lambda: self.apply_preset("early"))
+        grid1.addWidget(btn_early)
+        
+        layout.addLayout(grid1)
+        
+        grid2 = QHBoxLayout()
+        
+        btn_absence = QPushButton("❌ Absences")
+        btn_absence.setStyleSheet(self.get_preset_button_style("#E74C3C"))
+        btn_absence.clicked.connect(lambda: self.apply_preset("absence"))
+        grid2.addWidget(btn_absence)
+        
+        btn_overtime = QPushButton("💼 Heures supplémentaires")
+        btn_overtime.setStyleSheet(self.get_preset_button_style("#16A085"))
+        btn_overtime.clicked.connect(lambda: self.apply_preset("overtime"))
+        grid2.addWidget(btn_overtime)
+        
+        btn_incomplete = QPushButton("⚠️ Journées incomplètes")
+        btn_incomplete.setStyleSheet(self.get_preset_button_style("#F39C12"))
+        btn_incomplete.clicked.connect(lambda: self.apply_preset("incomplete"))
+        grid2.addWidget(btn_incomplete)
+        
+        layout.addLayout(grid2)
+        
+        group.setLayout(layout)
+        return group
+    
+    def get_preset_button_style(self, color):
+        """Get consistent styling for preset buttons"""
+        # Calculate darker color for hover by reducing RGB values
+        return f"""
+            QPushButton {{
+                background-color: {color};
+                color: white;
+                padding: 15px;
+                font-size: 12px;
+                font-weight: bold;
+                border-radius: 5px;
+                min-width: 150px;
+            }}
+            QPushButton:hover {{
+                background-color: {color};
+                opacity: 0.9;
+            }}
+        """
+    
+    def create_preview_table(self):
+        """Create preview table (Zone C)"""
+        group = QGroupBox("👁️ Aperçu des données")
+        layout = QVBoxLayout()
+        
+        # Info label
+        self.preview_info_label = QLabel("Aperçu chargé automatiquement...")
+        self.preview_info_label.setStyleSheet("color: #7F8C8D; font-style: italic; padding: 5px;")
+        layout.addWidget(self.preview_info_label)
+        
+        # Table
+        self.preview_table = QTableWidget()
+        self.preview_table.setColumnCount(8)
+        self.preview_table.setHorizontalHeaderLabels([
+            "Employé", "Date", "Entrée", "Sortie", "Heures", "Retard", "Heures sup", "Statut"
+        ])
+        self.preview_table.horizontalHeader().setStretchLastSection(True)
+        self.preview_table.setAlternatingRowColors(True)
+        self.preview_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.preview_table.verticalHeader().setVisible(False)
+        
+        # Set column widths
+        header = self.preview_table.horizontalHeader()
+        header.setStretchLastSection(False)
+        for i in [0, 1, 2, 3, 4, 5, 6, 7]:
+            header.setSectionResizeMode(i, QHeaderView.ResizeToContents if i != 0 else QHeaderView.Stretch)
+        
+        layout.addWidget(self.preview_table)
+        
+        group.setLayout(layout)
+        return group
+    
+    def create_export_actions(self):
+        """Create export actions panel at bottom"""
+        group = QGroupBox("📤 Exportation")
+        layout = QHBoxLayout()
+        
+        # Export format (Excel only as per user request)
+        format_label = QLabel("Format :")
+        format_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(format_label)
+        
+        self.export_format_label = QLabel("📊 Excel (.xlsx)")
+        self.export_format_label.setStyleSheet("color: #27AE60; font-weight: bold;")
+        layout.addWidget(self.export_format_label)
+        
+        layout.addSpacing(20)
+        
+        # Mode (Daily summary only - "journal de présence")
+        mode_label = QLabel("Mode :")
+        mode_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(mode_label)
+        
+        self.export_mode_label = QLabel("📅 Journal de présence (résumé journalier)")
+        self.export_mode_label.setStyleSheet("color: #27AE60; font-weight: bold;")
+        layout.addWidget(self.export_mode_label)
+        
+        layout.addStretch()
+        
+        # Export button
+        export_btn = QPushButton("📥 Exporter vers Excel")
+        export_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27AE60;
+                color: white;
+                padding: 15px 30px;
+                font-size: 14px;
+                font-weight: bold;
+                border-radius: 5px;
+                min-width: 200px;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+        """)
+        export_btn.clicked.connect(self.export_to_excel)
+        layout.addWidget(export_btn)
+        
+        group.setLayout(layout)
+        return group
+    
+    def set_filter_this_month(self):
+        """Set filter to current month"""
+        from PyQt5.QtCore import QDate
+        today = QDate.currentDate()
+        first_day = QDate(today.year(), today.month(), 1)
+        last_day = QDate(today.year(), today.month(), calendar.monthrange(today.year(), today.month())[1])
+        self.filter_start_date.setDate(first_day)
+        self.filter_end_date.setDate(last_day)
+        self.apply_filters_and_refresh()
+    
+    def set_filter_this_week(self):
+        """Set filter to current week"""
+        from PyQt5.QtCore import QDate
+        today = QDate.currentDate()
+        # Start of week (Monday)
+        days_since_monday = (today.dayOfWeek() - 1) % 7
+        start_of_week = today.addDays(-days_since_monday)
+        end_of_week = start_of_week.addDays(6)
+        self.filter_start_date.setDate(start_of_week)
+        self.filter_end_date.setDate(end_of_week)
+        self.apply_filters_and_refresh()
+    
+    def reset_filters(self):
+        """Reset all filters to default"""
+        from PyQt5.QtCore import QDate
+        # Reset dates to current month
+        today = QDate.currentDate()
+        self.filter_start_date.setDate(QDate(today.year(), today.month(), 1))
+        self.filter_end_date.setDate(today)
+        
+        # Reset employee
+        self.filter_employee_combo.setCurrentIndex(0)
+        
+        # Uncheck all situation filters
+        self.filter_retards.setChecked(False)
+        self.filter_departs.setChecked(False)
+        self.filter_absences.setChecked(False)
+        self.filter_heures_sup.setChecked(False)
+        self.filter_incomplet.setChecked(False)
+        
+        # Reset thresholds
+        self.filter_late_threshold.setValue(5)
+        self.filter_early_threshold.setValue(10)
+        self.filter_overtime_threshold.setValue(30)
+        
+        # Uncheck all method filters
+        self.filter_method_face.setChecked(False)
+        self.filter_method_card.setChecked(False)
+        self.filter_method_manual.setChecked(False)
+    
+    def reset_and_refresh(self):
+        """Reset filters and refresh preview"""
+        self.reset_filters()
+        self.apply_filters_and_refresh()
+    
+    def apply_preset(self, preset_type):
+        """Apply a preset filter configuration"""
+        from PyQt5.QtCore import QDate
+        
+        # Reset all filters first (without refreshing)
+        today = QDate.currentDate()
+        self.filter_start_date.setDate(QDate(today.year(), today.month(), 1))
+        last_day = QDate(today.year(), today.month(), calendar.monthrange(today.year(), today.month())[1])
+        self.filter_end_date.setDate(last_day)
+        
+        # Reset employee
+        self.filter_employee_combo.setCurrentIndex(0)
+        
+        # Uncheck all situation filters
+        self.filter_retards.setChecked(False)
+        self.filter_departs.setChecked(False)
+        self.filter_absences.setChecked(False)
+        self.filter_heures_sup.setChecked(False)
+        self.filter_incomplet.setChecked(False)
+        
+        # Reset thresholds
+        self.filter_late_threshold.setValue(5)
+        self.filter_early_threshold.setValue(10)
+        self.filter_overtime_threshold.setValue(30)
+        
+        # Uncheck all method filters
+        self.filter_method_face.setChecked(False)
+        self.filter_method_card.setChecked(False)
+        self.filter_method_manual.setChecked(False)
+        
+        # Now apply the specific preset filter
+        if preset_type == "all":
+            # All presences - no additional filters
+            pass
+        elif preset_type == "late":
+            # Late arrivals
+            self.filter_retards.setChecked(True)
+        elif preset_type == "early":
+            # Early departures
+            self.filter_departs.setChecked(True)
+        elif preset_type == "absence":
+            # Absences
+            self.filter_absences.setChecked(True)
+        elif preset_type == "overtime":
+            # Overtime
+            self.filter_heures_sup.setChecked(True)
+        elif preset_type == "incomplete":
+            # Incomplete days
+            self.filter_incomplet.setChecked(True)
+        
+        # Now refresh with the preset applied
+        self.apply_filters_and_refresh()
+    
+    def apply_filters_and_refresh(self):
+        """Apply current filters and refresh preview table"""
+        try:
+            # Get date range
+            start_date = self.filter_start_date.date().toPyDate()
+            end_date = self.filter_end_date.date().toPyDate()
+            
+            # Get employee filter
+            employee_id = self.filter_employee_combo.currentData()
+            
+            # Generate payroll summary for date range
+            summaries = self.db.generate_payroll_summary(start_date, end_date)
+            
+            # Filter by employee if specified
+            if employee_id:
+                summaries = [s for s in summaries if s['employee_id'] == employee_id]
+            
+            # Apply situation filters
+            filtered_summaries = []
+            for summary in summaries:
+                include = True
+                
+                # If any situation filter is checked, apply them
+                if (self.filter_retards.isChecked() or self.filter_departs.isChecked() or 
+                    self.filter_absences.isChecked() or self.filter_heures_sup.isChecked() or 
+                    self.filter_incomplet.isChecked()):
+                    
+                    include = False
+                    
+                    # Use 'or' instead of 'if' to allow multiple conditions
+                    if self.filter_retards.isChecked() and summary.get('late_minutes', 0) > self.filter_late_threshold.value():
+                        include = True
+                    
+                    if self.filter_departs.isChecked() and summary.get('early_leave_minutes', 0) > self.filter_early_threshold.value():
+                        include = True
+                    
+                    if self.filter_absences.isChecked() and (not summary.get('first_in') or not summary.get('last_out')):
+                        include = True
+                    
+                    if self.filter_heures_sup.isChecked() and summary.get('overtime_minutes', 0) > self.filter_overtime_threshold.value():
+                        include = True
+                    
+                    if self.filter_incomplet.isChecked():
+                        # Check for incomplete days (mismatched IN/OUT counts)
+                        # This would require additional data from database
+                        pass
+                
+                if include:
+                    filtered_summaries.append(summary)
+            
+            # Update preview table
+            self.update_preview_table(filtered_summaries)
+            
+            # Update info label
+            self.preview_info_label.setText(
+                f"✅ Aperçu actualisé : {len(filtered_summaries)} enregistrements trouvés "
+                f"({start_date} au {end_date})"
+            )
+            self.preview_info_label.setStyleSheet("color: #27AE60; font-weight: bold; padding: 5px;")
+            
+        except Exception as e:
+            import traceback
+            error_msg = f"Erreur lors de l'actualisation :\n{str(e)}\n\n{traceback.format_exc()}"
+            print(error_msg)  # Print to console for debugging
+            QMessageBox.warning(self, "Erreur", f"Erreur lors de l'actualisation : {str(e)}")
+    
+    def update_preview_table(self, summaries):
+        """Update preview table with summary data"""
+        self.preview_table.setRowCount(0)
+        
+        for summary in summaries:
+            row = self.preview_table.rowCount()
+            self.preview_table.insertRow(row)
+            
+            # Employee name
+            self.preview_table.setItem(row, 0, QTableWidgetItem(summary.get('employee_name', 'N/A')))
+            
+            # Date
+            self.preview_table.setItem(row, 1, QTableWidgetItem(summary.get('date', 'N/A')))
+            
+            # First IN
+            first_in = summary.get('first_in') if summary.get('first_in') else 'N/A'
+            self.preview_table.setItem(row, 2, QTableWidgetItem(first_in))
+            
+            # Last OUT
+            last_out = summary.get('last_out') if summary.get('last_out') else 'N/A'
+            self.preview_table.setItem(row, 3, QTableWidgetItem(last_out))
+            
+            # Hours worked
+            hours_worked = summary.get('hours_worked', 0)
+            hours = f"{hours_worked:.2f}h" if hours_worked else "0.00h"
+            self.preview_table.setItem(row, 4, QTableWidgetItem(hours))
+            
+            # Late minutes
+            late_minutes = summary.get('late_minutes', 0)
+            late_item = QTableWidgetItem(f"{late_minutes} min")
+            if late_minutes > 0:
+                late_item.setBackground(QBrush(QColor(231, 76, 60, 80)))  # Red
+            self.preview_table.setItem(row, 5, late_item)
+            
+            # Overtime minutes
+            overtime_minutes = summary.get('overtime_minutes', 0)
+            overtime_item = QTableWidgetItem(f"{overtime_minutes} min")
+            if overtime_minutes > 0:
+                overtime_item.setBackground(QBrush(QColor(52, 152, 219, 80)))  # Blue
+            self.preview_table.setItem(row, 6, overtime_item)
+            
+            # Status
+            status = "✓ Complet"
+            status_color = None
+            early_leave = summary.get('early_leave_minutes', 0)
+            
+            if not summary.get('first_in') or not summary.get('last_out'):
+                status = "⚫ Absent"
+                status_color = QColor(149, 165, 166, 80)  # Grey
+            elif late_minutes > 0:
+                status = "🔴 Retard"
+                status_color = QColor(231, 76, 60, 80)  # Red
+            elif early_leave > 0:
+                status = "🟠 Départ anticipé"
+                status_color = QColor(230, 126, 34, 80)  # Orange
+            elif overtime_minutes > 30:
+                status = "🔵 Heures sup"
+                status_color = QColor(52, 152, 219, 80)  # Blue
+            
+            status_item = QTableWidgetItem(status)
+            if status_color:
+                status_item.setBackground(QBrush(status_color))
+            self.preview_table.setItem(row, 7, status_item)
+    
+    def export_to_excel(self):
+        """Export current preview data to Excel"""
+        if self.preview_table.rowCount() == 0:
+            QMessageBox.warning(self, "Attention", "Aucune donnée à exporter. Veuillez appliquer des filtres d'abord.")
+            return
+        
+        # Get filename
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exporter vers Excel",
+            f"journal_presence_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            "Excel Files (*.xlsx)"
+        )
+        
+        if not filename:
+            return
+        
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill, Alignment
+            
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Journal de Présence"
+            
+            # Headers
+            headers = ["Employé", "Date", "Entrée", "Sortie", "Heures", "Retard (min)", "Heures sup (min)", "Statut"]
+            ws.append(headers)
+            
+            # Style headers
+            header_fill = PatternFill(start_color="3498DB", end_color="3498DB", fill_type="solid")
+            header_font = Font(bold=True, color="FFFFFF")
+            for cell in ws[1]:
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal="center")
+            
+            # Add data from preview table
+            for row in range(self.preview_table.rowCount()):
+                row_data = []
+                for col in range(self.preview_table.columnCount()):
+                    item = self.preview_table.item(row, col)
+                    row_data.append(item.text() if item else "")
+                ws.append(row_data)
+            
+            # Auto-adjust column widths
+            for column in ws.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(cell.value)
+                    except:
+                        pass
+                adjusted_width = (max_length + 2)
+                ws.column_dimensions[column_letter].width = adjusted_width
+            
+            # Save
+            wb.save(filename)
+            
+            # Show success message
+            QMessageBox.information(self, "Succès",
+                f"✅ Fichier généré avec succès!\n\n"
+                f"📁 Fichier: {filename}\n"
+                f"📊 Lignes exportées: {self.preview_table.rowCount()}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Échec de l'exportation : {str(e)}")
+    
+    def load_employees_to_combo(self):
+        """Load employees into single employee combo box"""
+        self.single_employee_combo.clear()
+        employees = self.db.get_all_employees()
+        for emp in employees:
+            self.single_employee_combo.addItem(f"{emp.name} ({emp.employee_id})", emp.employee_id)
+    
+    def load_employees_to_list(self):
+        """Load employees into multiple selection list"""
+        self.multiple_employees_list.clear()
+        employees = self.db.get_all_employees()
+        for emp in employees:
+            self.multiple_employees_list.addItem(f"{emp.name} ({emp.employee_id})")
+    
+    def get_filter_date_range(self):
+        """Get the date range based on selected period filter"""
+        selected_period = self.period_type_group.checkedId()
+        
+        if selected_period == 1:  # Month
+            month = self.month_combo.currentIndex() + 1
+            year = int(self.year_combo.currentText())
+            
+            # First day of month
+            start_date = datetime(year, month, 1).date()
+            
+            # Last day of month
+            if month == 12:
+                end_date = datetime(year, 12, 31).date()
+            else:
+                end_date = datetime(year, month + 1, 1).date()
+                end_date = end_date.replace(day=end_date.day - 1) if end_date.day > 1 else end_date
+            
+            # Simple approach: just get last day of month
+            import calendar
+            last_day = calendar.monthrange(year, month)[1]
+            end_date = datetime(year, month, last_day).date()
+            
+        elif selected_period == 2:  # Week
+            start_date = self.week_start_date.date().toPyDate()
+            end_date = start_date.replace(day=start_date.day + 6)
+            
+        else:  # Custom
+            start_date = self.custom_start_date.date().toPyDate()
+            end_date = self.custom_end_date.date().toPyDate()
+        
+        return start_date, end_date
+    
+    def get_filter_employees(self):
+        """Get the list of employee IDs based on selected employee filter"""
+        selected_type = self.employee_type_group.checkedId()
+        
+        if selected_type == 1:  # All employees
+            return None  # None means all
+        elif selected_type == 2:  # Single employee
+            return [self.single_employee_combo.currentData()]
+        else:  # Multiple employees
+            selected_items = self.multiple_employees_list.selectedItems()
+            employee_ids = []
+            for item in selected_items:
+                # Extract employee_id from "Name (ID)" format
+                text = item.text()
+                emp_id = text[text.rfind('(') + 1:text.rfind(')')]
+                employee_ids.append(emp_id)
+            return employee_ids if employee_ids else None
+    
+    def export_filtered_audit_trail(self):
+        """Export audit trail with filters"""
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exporter audit trail",
+            f"audit_trail_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            "CSV Files (*.csv)"
+        )
+        
+        if filename:
+            try:
+                start_date, end_date = self.get_filter_date_range()
+                employee_ids = self.get_filter_employees()
+                
+                # For now, use the basic export and filter in future
+                self.db.export_audit_trail_csv(start_date, end_date, filename)
+                
+                QMessageBox.information(self, "Succès", 
+                    f"Audit trail exporté avec succès!\n\n"
+                    f"Période: {start_date} à {end_date}\n"
+                    f"Fichier: {filename}")
+            except Exception as e:
+                QMessageBox.critical(self, "Erreur", f"Échec d'exportation : {str(e)}")
+    
+    def export_filtered_payroll_csv(self):
+        """Export payroll summary to CSV with filters"""
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exporter données paie (CSV)",
+            f"payroll_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            "CSV Files (*.csv)"
+        )
+        
+        if filename:
+            try:
+                start_date, end_date = self.get_filter_date_range()
+                employee_ids = self.get_filter_employees()
+                
+                # Export payroll
+                self.db.export_payroll_csv(start_date, end_date, filename)
+                
+                QMessageBox.information(self, "Succès",
+                    f"Données paie exportées avec succès!\n\n"
+                    f"Période: {start_date} à {end_date}\n"
+                    f"Format: CSV\n"
+                    f"Fichier: {filename}")
+            except Exception as e:
+                QMessageBox.critical(self, "Erreur", f"Échec d'exportation : {str(e)}")
+    
+    def export_filtered_payroll_excel(self):
+        """Export payroll summary to Excel with filters"""
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exporter données paie (Excel)",
+            f"payroll_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            "Excel Files (*.xlsx)"
+        )
+        
+        if filename:
+            try:
+                start_date, end_date = self.get_filter_date_range()
+                employee_ids = self.get_filter_employees()
+                
+                # Export payroll
+                self.db.export_payroll_excel(start_date, end_date, filename)
+                
+                QMessageBox.information(self, "Succès",
+                    f"Données paie exportées avec succès!\n\n"
+                    f"Période: {start_date} à {end_date}\n"
+                    f"Format: Excel (XLSX)\n"
+                    f"Fichier: {filename}")
+            except Exception as e:
+                QMessageBox.critical(self, "Erreur", f"Échec d'exportation : {str(e)}")
+    
+    def export_late_arrivals_report(self):
+        """Export late arrivals report"""
+        # Show filter dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Filtres pour rapport retards")
+        dialog.setFixedWidth(400)
+        
+        layout = QVBoxLayout()
+        dialog.setLayout(layout)
+        
+        layout.addWidget(QLabel("Sélectionnez les critères de retard :"))
+        
+        late_5min = QCheckBox("Retard > 5 minutes")
+        layout.addWidget(late_5min)
+        
+        late_10min = QCheckBox("Retard > 10 minutes")
+        layout.addWidget(late_10min)
+        
+        late_30min = QCheckBox("Retard > 30 minutes")
+        layout.addWidget(late_30min)
+        
+        all_lates = QCheckBox("Tous les retards (>0 min)")
+        all_lates.setChecked(True)
+        layout.addWidget(all_lates)
+        
+        btn_layout = QHBoxLayout()
+        ok_btn = QPushButton("Exporter")
+        ok_btn.clicked.connect(dialog.accept)
+        cancel_btn = QPushButton("Annuler")
+        cancel_btn.clicked.connect(dialog.reject)
+        btn_layout.addWidget(cancel_btn)
+        btn_layout.addWidget(ok_btn)
+        layout.addLayout(btn_layout)
+        
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exporter rapport retards",
+            f"late_arrivals_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            "CSV Files (*.csv)"
+        )
+        
+        if filename:
+            try:
+                import csv
+                
+                start_date, end_date = self.get_filter_date_range()
+                summaries = self.db.generate_payroll_summary(start_date, end_date)
+                
+                # Filter based on selected criteria
+                filtered = []
+                for summary in summaries:
+                    late_min = summary['late_minutes']
+                    
+                    include = False
+                    if all_lates.isChecked() and late_min > 0:
+                        include = True
+                    elif late_5min.isChecked() and late_min > 5:
+                        include = True
+                    elif late_10min.isChecked() and late_min > 10:
+                        include = True
+                    elif late_30min.isChecked() and late_min > 30:
+                        include = True
+                    
+                    if include:
+                        filtered.append(summary)
+                
+                # Get official start time
+                official_start = self.db.get_setting('official_start_time')
+                
+                # Write CSV
+                with open(filename, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(['Employee ID', 'Name', 'Date', 'Official Time', 'Actual Arrival', 'Late Minutes'])
+                    
+                    for item in filtered:
+                        writer.writerow([
+                            item['employee_id'],
+                            item['employee_name'],
+                            item['date'],
+                            official_start,
+                            item['first_in'],
+                            item['late_minutes']
+                        ])
+                
+                QMessageBox.information(self, "Succès",
+                    f"✅ Rapport retards exporté!\n\n"
+                    f"📅 Période: {start_date} à {end_date}\n"
+                    f"📊 Total: {len(filtered)} enregistrements\n"
+                    f"📁 Fichier: {filename}")
+            except Exception as e:
+                QMessageBox.critical(self, "Erreur", f"Échec d'exportation : {str(e)}")
+    
+    def export_early_departures_report(self):
+        """Export early departures report"""
+        # Show filter dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Filtres pour rapport sorties anticipées")
+        dialog.setFixedWidth(400)
+        
+        layout = QVBoxLayout()
+        dialog.setLayout(layout)
+        
+        layout.addWidget(QLabel("Sélectionnez les critères de sortie anticipée :"))
+        
+        early_5min = QCheckBox("Sortie anticipée > 5 minutes")
+        layout.addWidget(early_5min)
+        
+        early_15min = QCheckBox("Sortie anticipée > 15 minutes")
+        layout.addWidget(early_15min)
+        
+        early_30min = QCheckBox("Sortie anticipée > 30 minutes")
+        layout.addWidget(early_30min)
+        
+        all_early = QCheckBox("Toutes les sorties anticipées (>0 min)")
+        all_early.setChecked(True)
+        layout.addWidget(all_early)
+        
+        btn_layout = QHBoxLayout()
+        ok_btn = QPushButton("Exporter")
+        ok_btn.clicked.connect(dialog.accept)
+        cancel_btn = QPushButton("Annuler")
+        cancel_btn.clicked.connect(dialog.reject)
+        btn_layout.addWidget(cancel_btn)
+        btn_layout.addWidget(ok_btn)
+        layout.addLayout(btn_layout)
+        
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exporter rapport départs anticipés",
+            f"early_departures_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            "CSV Files (*.csv)"
+        )
+        
+        if filename:
+            try:
+                import csv
+                
+                start_date, end_date = self.get_filter_date_range()
+                summaries = self.db.generate_payroll_summary(start_date, end_date)
+                
+                # Filter based on selected criteria
+                filtered = []
+                for summary in summaries:
+                    early_min = summary['early_leave_minutes']
+                    
+                    include = False
+                    if all_early.isChecked() and early_min > 0:
+                        include = True
+                    elif early_5min.isChecked() and early_min > 5:
+                        include = True
+                    elif early_15min.isChecked() and early_min > 15:
+                        include = True
+                    elif early_30min.isChecked() and early_min > 30:
+                        include = True
+                    
+                    if include:
+                        filtered.append(summary)
+                
+                # Get official end time
+                official_end = self.db.get_setting('official_end_time')
+                
+                # Write CSV
+                with open(filename, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(['Employee ID', 'Name', 'Date', 'Official Time', 'Actual Departure', 'Early Leave Minutes'])
+                    
+                    for item in filtered:
+                        writer.writerow([
+                            item['employee_id'],
+                            item['employee_name'],
+                            item['date'],
+                            official_end,
+                            item['last_out'],
+                            item['early_leave_minutes']
+                        ])
+                
+                QMessageBox.information(self, "Succès",
+                    f"✅ Rapport départs anticipés exporté!\n\n"
+                    f"📅 Période: {start_date} à {end_date}\n"
+                    f"📊 Total: {len(filtered)} enregistrements\n"
+                    f"📁 Fichier: {filename}")
+            except Exception as e:
+                QMessageBox.critical(self, "Erreur", f"Échec d'exportation : {str(e)}")
+    
+    def export_absences_report(self):
+        """Export absences report"""
+        # Show filter dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Filtres pour rapport absences")
+        dialog.setFixedWidth(400)
+        
+        layout = QVBoxLayout()
+        dialog.setLayout(layout)
+        
+        layout.addWidget(QLabel("Sélectionnez les types d'absence :"))
+        
+        absence_complete = QCheckBox("Absence complète (pas de IN/OUT)")
+        layout.addWidget(absence_complete)
+        
+        absence_no_in = QCheckBox("Pas de pointage IN")
+        layout.addWidget(absence_no_in)
+        
+        absence_no_out = QCheckBox("Pas de pointage OUT")
+        layout.addWidget(absence_no_out)
+        
+        all_absences = QCheckBox("Toutes les absences")
+        all_absences.setChecked(True)
+        layout.addWidget(all_absences)
+        
+        btn_layout = QHBoxLayout()
+        ok_btn = QPushButton("Exporter")
+        ok_btn.clicked.connect(dialog.accept)
+        cancel_btn = QPushButton("Annuler")
+        cancel_btn.clicked.connect(dialog.reject)
+        btn_layout.addWidget(cancel_btn)
+        btn_layout.addWidget(ok_btn)
+        layout.addLayout(btn_layout)
+        
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exporter rapport absences",
+            f"absences_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            "CSV Files (*.csv)"
+        )
+        
+        if filename:
+            try:
+                import csv
+                
+                start_date, end_date = self.get_filter_date_range()
+                summaries = self.db.generate_payroll_summary(start_date, end_date)
+                
+                # Filter based on selected criteria
+                filtered = []
+                for summary in summaries:
+                    has_in = summary['first_in'] is not None
+                    has_out = summary['last_out'] is not None
+                    
+                    include = False
+                    if all_absences.isChecked() and (not has_in or not has_out):
+                        include = True
+                    elif absence_complete.isChecked() and not has_in and not has_out:
+                        include = True
+                    elif absence_no_in.isChecked() and not has_in:
+                        include = True
+                    elif absence_no_out.isChecked() and not has_out:
+                        include = True
+                    
+                    if include:
+                        filtered.append(summary)
+                
+                # Write CSV
+                with open(filename, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(['Employee ID', 'Name', 'Date', 'First IN', 'Last OUT', 'Status'])
+                    
+                    for item in filtered:
+                        status = 'Absent complet'
+                        if item['first_in'] and not item['last_out']:
+                            status = 'Pas de OUT'
+                        elif not item['first_in'] and item['last_out']:
+                            status = 'Pas de IN'
+                        
+                        writer.writerow([
+                            item['employee_id'],
+                            item['employee_name'],
+                            item['date'],
+                            item['first_in'] if item['first_in'] else 'N/A',
+                            item['last_out'] if item['last_out'] else 'N/A',
+                            status
+                        ])
+                
+                QMessageBox.information(self, "Succès",
+                    f"✅ Rapport absences exporté!\n\n"
+                    f"📅 Période: {start_date} à {end_date}\n"
+                    f"📊 Total: {len(filtered)} enregistrements\n"
+                    f"📁 Fichier: {filename}")
+            except Exception as e:
+                QMessageBox.critical(self, "Erreur", f"Échec d'exportation : {str(e)}")
+    
+    def export_incomplete_days_report(self):
+        """Export incomplete days report"""
+        # Show filter dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Filtres pour rapport journées incomplètes")
+        dialog.setFixedWidth(400)
+        
+        layout = QVBoxLayout()
+        dialog.setLayout(layout)
+        
+        layout.addWidget(QLabel("Sélectionnez les types d'anomalies :"))
+        
+        incomplete_in_no_out = QCheckBox("IN sans OUT")
+        layout.addWidget(incomplete_in_no_out)
+        
+        incomplete_out_no_in = QCheckBox("OUT sans IN")
+        layout.addWidget(incomplete_out_no_in)
+        
+        incomplete_odd_punches = QCheckBox("Nombre impair de pointages")
+        layout.addWidget(incomplete_odd_punches)
+        
+        all_incomplete = QCheckBox("Toutes les journées incomplètes")
+        all_incomplete.setChecked(True)
+        layout.addWidget(all_incomplete)
+        
+        btn_layout = QHBoxLayout()
+        ok_btn = QPushButton("Exporter")
+        ok_btn.clicked.connect(dialog.accept)
+        cancel_btn = QPushButton("Annuler")
+        cancel_btn.clicked.connect(dialog.reject)
+        btn_layout.addWidget(cancel_btn)
+        btn_layout.addWidget(ok_btn)
+        layout.addLayout(btn_layout)
+        
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exporter rapport journées incomplètes",
+            f"incomplete_days_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            "CSV Files (*.csv)"
+        )
+        
+        if filename:
+            try:
+                import csv
+                import sqlite3
+                
+                start_date, end_date = self.get_filter_date_range()
+                
+                # Get raw attendance data to check for incomplete days
+                filtered = []
+                employees = self.db.get_all_employees()
+                
+                with sqlite3.connect(self.db.db_path) as conn:
+                    cursor = conn.cursor()
+                    
+                    for emp in employees:
+                        # Get all punches for this employee in date range
+                        cursor.execute('''
+                            SELECT DATE(timestamp), type, TIME(timestamp), COUNT(*)
+                            FROM attendance_logs
+                            WHERE employee_id = ?
+                            AND DATE(timestamp) BETWEEN ? AND ?
+                            AND status = 'ACCEPTED'
+                            GROUP BY DATE(timestamp), type
+                            ORDER BY timestamp
+                        ''', (emp.employee_id, start_date, end_date))
+                        
+                        daily_data = {}
+                        for row in cursor.fetchall():
+                            date = row[0]
+                            punch_type = row[1]
+                            
+                            if date not in daily_data:
+                                daily_data[date] = {'in_count': 0, 'out_count': 0}
+                            
+                            if punch_type == 'IN':
+                                daily_data[date]['in_count'] += 1
+                            else:
+                                daily_data[date]['out_count'] += 1
+                        
+                        # Check for incomplete days
+                        for date, counts in daily_data.items():
+                            in_count = counts['in_count']
+                            out_count = counts['out_count']
+                            
+                            include = False
+                            issue = ""
+                            
+                            if all_incomplete.isChecked() and in_count != out_count:
+                                include = True
+                                if in_count > out_count:
+                                    issue = "IN sans OUT"
+                                else:
+                                    issue = "OUT sans IN"
+                            elif incomplete_in_no_out.isChecked() and in_count > 0 and out_count == 0:
+                                include = True
+                                issue = "IN sans OUT"
+                            elif incomplete_out_no_in.isChecked() and out_count > 0 and in_count == 0:
+                                include = True
+                                issue = "OUT sans IN"
+                            elif incomplete_odd_punches.isChecked() and (in_count + out_count) % 2 != 0:
+                                include = True
+                                issue = "Nombre impair de pointages"
+                            
+                            if include:
+                                filtered.append({
+                                    'employee_id': emp.employee_id,
+                                    'name': emp.name,
+                                    'date': date,
+                                    'in_count': in_count,
+                                    'out_count': out_count,
+                                    'issue': issue
+                                })
+                
+                # Write CSV
+                with open(filename, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(['Employee ID', 'Name', 'Date', 'IN Count', 'OUT Count', 'Issue'])
+                    
+                    for item in filtered:
+                        writer.writerow([
+                            item['employee_id'],
+                            item['name'],
+                            item['date'],
+                            item['in_count'],
+                            item['out_count'],
+                            item['issue']
+                        ])
+                
+                QMessageBox.information(self, "Succès",
+                    f"✅ Rapport journées incomplètes exporté!\n\n"
+                    f"📅 Période: {start_date} à {end_date}\n"
+                    f"📊 Total: {len(filtered)} enregistrements\n"
+                    f"📁 Fichier: {filename}")
+            except Exception as e:
+                QMessageBox.critical(self, "Erreur", f"Échec d'exportation : {str(e)}")
+                
+                QMessageBox.information(self, "Succès",
+                    f"Rapport journées incomplètes exporté!\n\n"
+                    f"Période: {start_date} à {end_date}\n"
+                    f"Total: {len(filtered)} enregistrements\n"
+                    f"Fichier: {filename}")
+            except Exception as e:
+                QMessageBox.critical(self, "Erreur", f"Échec d'exportation : {str(e)}")
 
     def add_employee(self):
         name = self.emp_name_input.text().strip()
@@ -669,6 +1938,10 @@ class AdminInterface(QWidget):
         self.db.update_setting('morning_end', self.morning_end.time().toString('HH:mm'))
         self.db.update_setting('afternoon_start', self.afternoon_start.time().toString('HH:mm'))
         self.db.update_setting('afternoon_end', self.afternoon_end.time().toString('HH:mm'))
+        
+        # Save official work hours
+        self.db.update_setting('official_start_time', self.official_start_time.time().toString('HH:mm'))
+        self.db.update_setting('official_end_time', self.official_end_time.time().toString('HH:mm'))
 
         # Save attendance mode
         mode_data = self.mode_combo.currentData()
