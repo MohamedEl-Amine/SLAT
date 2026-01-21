@@ -56,6 +56,18 @@
   {
    "optionDest": "bootloader_ignore_signals",
    "value": false
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/Majors Projects/SLAT/.venv/Lib/site-packages/pyzbar/libzbar-64.dll;pyzbar"
+  },
+  {
+   "optionDest": "binaries",
+   "value": "D:/Majors Projects/SLAT/.venv/Lib/site-packages/pyzbar/libiconv.dll;pyzbar"
+  },
+  {
+   "optionDest": "datas",
+   "value": "D:/Majors Projects/SLAT/.venv/Lib/site-packages/mtcnn/data;mtcnn\\data"
   }
  ],
  "nonPyinstallerOptions": {
