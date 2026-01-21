@@ -547,6 +547,9 @@ class AdminInterface(QWidget):
         right_layout = QVBoxLayout()
         right_widget.setLayout(right_layout)
         
+        # Store active preset for visual feedback
+        self.active_preset = None
+        
         # Zone B: Preset Buttons
         preset_group = self.create_preset_buttons()
         right_layout.addWidget(preset_group)
@@ -740,23 +743,29 @@ class AdminInterface(QWidget):
         title.setStyleSheet("font-size: 14px; font-weight: bold; padding: 5px;")
         layout.addWidget(title)
         
+        # Store preset buttons for later styling updates
+        self.preset_buttons = {}
+        
         # Preset buttons grid
         grid1 = QHBoxLayout()
         
         btn_all = QPushButton("📋 Toutes les présences")
         btn_all.setStyleSheet(self.get_preset_button_style("#3498DB"))
-        btn_all.clicked.connect(lambda: self.apply_preset("all"))
+        btn_all.clicked.connect(lambda: self.apply_preset("all", btn_all))
         grid1.addWidget(btn_all)
+        self.preset_buttons["all"] = (btn_all, "#3498DB")
         
         btn_late = QPushButton("🕐 Retards du mois")
         btn_late.setStyleSheet(self.get_preset_button_style("#E67E22"))
-        btn_late.clicked.connect(lambda: self.apply_preset("late"))
+        btn_late.clicked.connect(lambda: self.apply_preset("late", btn_late))
         grid1.addWidget(btn_late)
+        self.preset_buttons["late"] = (btn_late, "#E67E22")
         
         btn_early = QPushButton("🏃 Départs anticipés")
         btn_early.setStyleSheet(self.get_preset_button_style("#9B59B6"))
-        btn_early.clicked.connect(lambda: self.apply_preset("early"))
+        btn_early.clicked.connect(lambda: self.apply_preset("early", btn_early))
         grid1.addWidget(btn_early)
+        self.preset_buttons["early"] = (btn_early, "#9B59B6")
         
         layout.addLayout(grid1)
         
@@ -764,27 +773,30 @@ class AdminInterface(QWidget):
         
         btn_absence = QPushButton("❌ Absences")
         btn_absence.setStyleSheet(self.get_preset_button_style("#E74C3C"))
-        btn_absence.clicked.connect(lambda: self.apply_preset("absence"))
+        btn_absence.clicked.connect(lambda: self.apply_preset("absence", btn_absence))
         grid2.addWidget(btn_absence)
+        self.preset_buttons["absence"] = (btn_absence, "#E74C3C")
         
         btn_overtime = QPushButton("💼 Heures supplémentaires")
         btn_overtime.setStyleSheet(self.get_preset_button_style("#16A085"))
-        btn_overtime.clicked.connect(lambda: self.apply_preset("overtime"))
+        btn_overtime.clicked.connect(lambda: self.apply_preset("overtime", btn_overtime))
         grid2.addWidget(btn_overtime)
+        self.preset_buttons["overtime"] = (btn_overtime, "#16A085")
         
         btn_incomplete = QPushButton("⚠️ Journées incomplètes")
         btn_incomplete.setStyleSheet(self.get_preset_button_style("#F39C12"))
-        btn_incomplete.clicked.connect(lambda: self.apply_preset("incomplete"))
+        btn_incomplete.clicked.connect(lambda: self.apply_preset("incomplete", btn_incomplete))
         grid2.addWidget(btn_incomplete)
+        self.preset_buttons["incomplete"] = (btn_incomplete, "#F39C12")
         
         layout.addLayout(grid2)
         
         group.setLayout(layout)
         return group
     
-    def get_preset_button_style(self, color):
+    def get_preset_button_style(self, color, active=False):
         """Get consistent styling for preset buttons"""
-        # Calculate darker color for hover by reducing RGB values
+        border = "3px solid #2ECC71" if active else "2px solid transparent"
         return f"""
             QPushButton {{
                 background-color: {color};
@@ -794,10 +806,16 @@ class AdminInterface(QWidget):
                 font-weight: bold;
                 border-radius: 5px;
                 min-width: 150px;
+                border: {border};
             }}
             QPushButton:hover {{
                 background-color: {color};
                 opacity: 0.9;
+            }}
+            QPushButton:pressed {{
+                background-color: {color};
+                padding-top: 17px;
+                padding-bottom: 13px;
             }}
         """
     
@@ -937,9 +955,34 @@ class AdminInterface(QWidget):
         self.reset_filters()
         self.apply_filters_and_refresh()
     
-    def apply_preset(self, preset_type):
+    def apply_preset(self, preset_type, clicked_button=None):
         """Apply a preset filter configuration"""
         from PyQt5.QtCore import QDate
+        from PyQt5.QtWidgets import QApplication
+        
+        # Show loading state
+        preset_labels = {
+            "all": "📋 Toutes les présences",
+            "late": "🕐 Retards",
+            "early": "🏃 Départs anticipés",
+            "absence": "❌ Absences",
+            "overtime": "💼 Heures supplémentaires",
+            "incomplete": "⚠️ Journées incomplètes"
+        }
+        
+        self.preview_info_label.setText(f"⏳ Chargement de {preset_labels.get(preset_type, 'données')}...")
+        self.preview_info_label.setStyleSheet("color: #F39C12; font-weight: bold; padding: 5px; font-size: 13px;")
+        QApplication.processEvents()  # Force UI update
+        
+        # Reset all button styles
+        for preset_name, (btn, color) in self.preset_buttons.items():
+            btn.setStyleSheet(self.get_preset_button_style(color, active=False))
+        
+        # Highlight the active button
+        self.active_preset = preset_type
+        if preset_type in self.preset_buttons:
+            btn, color = self.preset_buttons[preset_type]
+            btn.setStyleSheet(self.get_preset_button_style(color, active=True))
         
         # Reset all filters first (without refreshing)
         today = QDate.currentDate()
@@ -1043,12 +1086,28 @@ class AdminInterface(QWidget):
             # Update preview table
             self.update_preview_table(filtered_summaries)
             
-            # Update info label
+            # Update info label with descriptive message
+            filter_desc = ""
+            if self.filter_retards.isChecked():
+                filter_desc = " avec retards"
+            elif self.filter_departs.isChecked():
+                filter_desc = " avec départs anticipés"
+            elif self.filter_absences.isChecked():
+                filter_desc = " avec absences"
+            elif self.filter_heures_sup.isChecked():
+                filter_desc = " avec heures supplémentaires"
+            elif self.filter_incomplet.isChecked():
+                filter_desc = " avec journées incomplètes"
+            
+            employee_desc = ""
+            if self.filter_employee_combo.currentIndex() > 0:
+                employee_desc = f" | Employé: {self.filter_employee_combo.currentText()}"
+            
             self.preview_info_label.setText(
-                f"✅ Aperçu actualisé : {len(filtered_summaries)} enregistrements trouvés "
-                f"({start_date} au {end_date})"
+                f"✅ {len(filtered_summaries)} enregistrements{filter_desc} | "
+                f"📅 {start_date.strftime('%d/%m/%Y')} au {end_date.strftime('%d/%m/%Y')}{employee_desc}"
             )
-            self.preview_info_label.setStyleSheet("color: #27AE60; font-weight: bold; padding: 5px;")
+            self.preview_info_label.setStyleSheet("color: #27AE60; font-weight: bold; padding: 5px; font-size: 13px;")
             
         except Exception as e:
             import traceback
