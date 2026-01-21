@@ -47,8 +47,8 @@ class PublicInterface(QWidget):
         self.setPalette(palette)
 
         self.layout = QVBoxLayout()
-        self.layout.setContentsMargins(30, 30, 30, 30)
-        self.layout.setSpacing(15)
+        self.layout.setContentsMargins(20, 15, 20, 15)
+        self.layout.setSpacing(10)
         self.setLayout(self.layout)
 
         # Top section: Logo, title, time
@@ -77,12 +77,12 @@ class PublicInterface(QWidget):
         if os.path.exists(logo_path):
             logo_label = QLabel()
             logo_pixmap = QPixmap(logo_path)
-            logo_label.setPixmap(logo_pixmap.scaled(80, 80, Qt.KeepAspectRatio))
+            logo_label.setPixmap(logo_pixmap.scaled(60, 60, Qt.KeepAspectRatio))
             logo_layout.addWidget(logo_label)
         
         # Society name
         society_label = QLabel("Facility Plus")
-        society_label.setFont(QFont("Arial", 22, QFont.Bold))
+        society_label.setFont(QFont("Arial", 18, QFont.Bold))
         society_label.setAlignment(Qt.AlignCenter)
         society_label.setStyleSheet("color: #2C3E50; padding: 10px;")
         logo_layout.addWidget(society_label)
@@ -91,7 +91,7 @@ class PublicInterface(QWidget):
 
         # Current date and time display
         self.datetime_label = QLabel()
-        self.datetime_label.setFont(QFont("Arial", 16))
+        self.datetime_label.setFont(QFont("Arial", 13))
         self.datetime_label.setAlignment(Qt.AlignCenter)
         self.datetime_label.setStyleSheet("color: #333333;")
         self.layout.addWidget(self.datetime_label)
@@ -104,14 +104,14 @@ class PublicInterface(QWidget):
 
         # Title
         title = QLabel("TERMINAL DE PRÉSENCE")
-        title.setFont(QFont("Arial", 28, QFont.Bold))
+        title.setFont(QFont("Arial", 22, QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("color: #2C3E50; padding: 15px;")
         self.layout.addWidget(title)
 
         # Current window info
         self.window_info_label = QLabel()
-        self.window_info_label.setFont(QFont("Arial", 14))
+        self.window_info_label.setFont(QFont("Arial", 12))
         self.window_info_label.setAlignment(Qt.AlignCenter)
         self.window_info_label.setStyleSheet("color: #7F8C8D; padding: 5px;")
         self.layout.addWidget(self.window_info_label)
@@ -136,7 +136,7 @@ class PublicInterface(QWidget):
         
         # Mode indicator
         self.mode_label = QLabel()
-        self.mode_label.setFont(QFont("Arial", 18, QFont.Bold))
+        self.mode_label.setFont(QFont("Arial", 16, QFont.Bold))
         self.mode_label.setAlignment(Qt.AlignCenter)
         self.mode_label.setStyleSheet("color: #3498DB; padding: 10px;")
         self.left_layout.addWidget(self.mode_label)
@@ -147,7 +147,7 @@ class PublicInterface(QWidget):
         # Camera display label
         self.camera_label = QLabel()
         self.camera_label.setAlignment(Qt.AlignCenter)
-        self.camera_label.setFixedSize(640, 480)
+        self.camera_label.setFixedSize(480, 360)
         self.camera_label.setScaledContents(False)
         self.camera_label.setStyleSheet("""
             QLabel {
@@ -165,13 +165,13 @@ class PublicInterface(QWidget):
         self.id_container.setLayout(self.id_layout)
         
         instruction = QLabel("Entrez votre ID employé")
-        instruction.setFont(QFont("Arial", 16))
+        instruction.setFont(QFont("Arial", 14))
         instruction.setAlignment(Qt.AlignCenter)
         instruction.setStyleSheet("color: #34495E; padding: 10px;")
         self.id_layout.addWidget(instruction)
         
         self.id_input = QLineEdit()
-        self.id_input.setFont(QFont("Arial", 24))
+        self.id_input.setFont(QFont("Arial", 20))
         self.id_input.setAlignment(Qt.AlignCenter)
         self.id_input.setPlaceholderText("ID Employé")
         self.id_input.setStyleSheet("""
@@ -233,11 +233,11 @@ class PublicInterface(QWidget):
         # Employee photo (larger for side display)
         self.employee_photo = QLabel()
         self.employee_photo.setAlignment(Qt.AlignCenter)
-        self.employee_photo.setFixedSize(200, 200)
+        self.employee_photo.setFixedSize(150, 150)
         self.employee_photo.setStyleSheet("""
             QLabel {
                 border: 3px solid #BDC3C7;
-                border-radius: 100px;
+                border-radius: 75px;
                 background-color: white;
             }
         """)
@@ -246,7 +246,7 @@ class PublicInterface(QWidget):
         
         # Employee name
         self.employee_name_label = QLabel()
-        self.employee_name_label.setFont(QFont("Arial", 28, QFont.Bold))
+        self.employee_name_label.setFont(QFont("Arial", 22, QFont.Bold))
         self.employee_name_label.setAlignment(Qt.AlignCenter)
         self.employee_name_label.setStyleSheet("color: #2C3E50; padding: 15px;")
         self.employee_name_label.hide()
@@ -255,7 +255,7 @@ class PublicInterface(QWidget):
         
         # Status message
         self.status_label = QLabel()
-        self.status_label.setFont(QFont("Arial", 22, QFont.Bold))
+        self.status_label.setFont(QFont("Arial", 18, QFont.Bold))
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setWordWrap(True)
         self.status_label.setMinimumHeight(150)

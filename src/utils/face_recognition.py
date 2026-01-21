@@ -8,10 +8,16 @@ import cv2
 import numpy as np
 from typing import Optional, Tuple, List
 import os
+import sys
 from mtcnn import MTCNN
 from facenet_pytorch import InceptionResnetV1
 import torch
 from PIL import Image
+
+def resource_path(rel_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(base, rel_path)
 
 class FaceRecognition:
     def __init__(self):
@@ -20,7 +26,17 @@ class FaceRecognition:
         
         # Initialize FaceNet recognition model (pre-trained on VGGFace2)
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.recognition_model = InceptionResnetV1(pretrained='vggface2').eval().to(self.device)
+        
+        # Load model from local weights (offline deployment)
+        weights_path = resource_path("models/20180402-114759-vggface2.pt")
+        self.recognition_model = InceptionResnetV1(pretrained=None).eval()
+        
+        # Load state dict and remove unexpected keys
+        state_dict = torch.load(weights_path, map_location=self.device)
+        # Remove logits layers (only needed for training)
+        state_dict = {k: v for k, v in state_dict.items() if not k.startswith('logits')}
+        self.recognition_model.load_state_dict(state_dict, strict=False)
+        self.recognition_model = self.recognition_model.to(self.device)
         
         # Similarity threshold for FaceNet (cosine similarity)
         self.similarity_threshold = 0.5  # Calibrated for FaceNet embeddings

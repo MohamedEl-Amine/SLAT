@@ -29,7 +29,7 @@ class EmployeeProfileDialog(QDialog):
             return
             
         self.setWindowTitle(f"Profil employé - {self.employee.name}")
-        self.setFixedSize(800, 600)
+        self.setMinimumSize(700, 550)
         
         self.setup_ui()
         self.load_employee_data()
@@ -171,12 +171,12 @@ class EmployeeProfileDialog(QDialog):
         # Create a dialog to show the QR code
         qr_dialog = QDialog(self)
         qr_dialog.setWindowTitle(f"Code QR - {self.employee.name}")
-        qr_dialog.setFixedSize(400, 450)
+        qr_dialog.setFixedSize(350, 400)
         
         layout = QVBoxLayout()
         
         qr_label = QLabel()
-        qr_label.setPixmap(qr_pixmap.scaled(300, 300, Qt.KeepAspectRatio))
+        qr_label.setPixmap(qr_pixmap.scaled(250, 250, Qt.KeepAspectRatio))
         layout.addWidget(qr_label, alignment=Qt.AlignCenter)
         
         # Employee info
@@ -298,7 +298,7 @@ class AdminInterface(QWidget):
         self.db = db
         self.public = public
         self.setWindowTitle("SLAT - Panneau d'administration")
-        self.setFixedSize(1600, 800)
+        self.setFixedSize(1300, 700)
 
         self.layout = QVBoxLayout()
         self.setLayout(self.layout)
@@ -380,8 +380,20 @@ class AdminInterface(QWidget):
         layout.addWidget(self.employee_table)
 
     def setup_settings_tab(self):
+        # Create main layout
+        main_layout = QVBoxLayout()
+        self.settings_tab.setLayout(main_layout)
+        
+        # Create scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        
+        # Create content widget
+        content_widget = QWidget()
         layout = QVBoxLayout()
-        self.settings_tab.setLayout(layout)
+        content_widget.setLayout(layout)
 
         # Time Windows Group
         windows_group = QGroupBox("Fenêtres de pointage")
@@ -525,6 +537,10 @@ class AdminInterface(QWidget):
         save_btn = QPushButton("Enregistrer les paramètres")
         save_btn.clicked.connect(self.save_settings)
         layout.addWidget(save_btn)
+        
+        # Set content widget to scroll area
+        scroll.setWidget(content_widget)
+        main_layout.addWidget(scroll)
 
     def setup_logs_tab(self):
         layout = QVBoxLayout()

@@ -11,3 +11,4 @@ data/*.key
 *.log
 data/
 output/
+src/models

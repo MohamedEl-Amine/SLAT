@@ -15,7 +15,7 @@
   },
   {
    "optionDest": "console",
-   "value": false
+   "value": true
   },
   {
    "optionDest": "icon_file",
@@ -68,6 +68,10 @@
   {
    "optionDest": "datas",
    "value": "D:/Majors Projects/SLAT/.venv/Lib/site-packages/mtcnn/data;mtcnn\\data"
+  },
+  {
+   "optionDest": "datas",
+   "value": "D:/Majors Projects/SLAT/src/models/20180402-114759-vggface2.pt;models"
   }
  ],
  "nonPyinstallerOptions": {
