@@ -1,27 +1,111 @@
 """
 Face recognition utilities for SLAT.
 Compliant with Mandatory Face Recognition Architecture specifications.
-Uses InsightFace's built-in RetinaFace detector and ArcFace recognition.
+Uses MTCNN for detection and FaceNet for recognition.
 """
 
 import cv2
 import numpy as np
-import insightface
 from typing import Optional, Tuple, List
 import os
+from mtcnn import MTCNN
+from facenet_pytorch import InceptionResnetV1
+import torch
+from PIL import Image
 
 class FaceRecognition:
     def __init__(self):
-        # Initialize InsightFace model with RetinaFace detector and ArcFace recognition
-        self.face_model = insightface.app.FaceAnalysis(name='buffalo_l')
-        self.face_model.prepare(ctx_id=-1, det_size=(640, 640))  # ctx_id=-1 for CPU
-
-        # Similarity threshold for ArcFace (calibrated for biometric matching)
-        # Lower values are more strict, higher values are more lenient
-        self.similarity_threshold = 0.4  # Cosine similarity threshold
-
+        # Initialize MTCNN detector
+        self.detector = MTCNN(min_face_size=80)
+        
+        # Initialize FaceNet recognition model (pre-trained on VGGFace2)
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.recognition_model = InceptionResnetV1(pretrained='vggface2').eval().to(self.device)
+        
+        # Similarity threshold for FaceNet (cosine similarity)
+        self.similarity_threshold = 0.5  # Calibrated for FaceNet embeddings
+        
         # Face detection confidence threshold
-        self.detection_threshold = 0.8
+        self.detection_threshold = 0.85  # Lowered for better detection
+        
+        print(f"Initialized MTCNN detector and FaceNet model on {self.device}")
+
+    def _detect_faces(self, frame: np.ndarray) -> List[dict]:
+        """Detect faces using MTCNN.
+        Returns: List of face dictionaries with bbox, confidence, and landmarks
+        """
+        try:
+            # Convert BGR to RGB for MTCNN
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Detect faces
+            detections = self.detector.detect_faces(rgb_frame)
+            
+            faces = []
+            for detection in detections:
+                confidence = detection['confidence']
+                if confidence >= self.detection_threshold:
+                    x, y, w, h = detection['box']
+                    # Convert to x1, y1, x2, y2 format
+                    bbox = [x, y, x + w, y + h]
+                    faces.append({
+                        'bbox': bbox,
+                        'confidence': confidence,
+                        'keypoints': detection['keypoints']
+                    })
+            
+            return faces
+        
+        except Exception as e:
+            print(f"Error in MTCNN face detection: {e}")
+            return []
+
+    def _extract_embedding(self, frame: np.ndarray, bbox: List[int]) -> Optional[np.ndarray]:
+        """Extract FaceNet embedding from a detected face.
+        Args:
+            frame: Image frame (BGR)
+            bbox: Bounding box [x1, y1, x2, y2]
+        Returns: 512-dimensional embedding vector or None
+        """
+        try:
+            x1, y1, x2, y2 = bbox
+            
+            # Ensure coordinates are within frame bounds
+            h, w = frame.shape[:2]
+            x1 = max(0, x1)
+            y1 = max(0, y1)
+            x2 = min(w, x2)
+            y2 = min(h, y2)
+            
+            # Crop and preprocess face
+            face = frame[y1:y2, x1:x2]
+            if face.size == 0:
+                return None
+            
+            # Convert BGR to RGB
+            face_rgb = cv2.cvtColor(face, cv2.COLOR_BGR2RGB)
+            
+            # Resize to 160x160 (FaceNet input size)
+            face_resized = cv2.resize(face_rgb, (160, 160))
+            
+            # Convert to tensor and normalize
+            face_tensor = torch.from_numpy(face_resized).permute(2, 0, 1).float()
+            face_tensor = (face_tensor - 127.5) / 128.0
+            face_tensor = face_tensor.unsqueeze(0).to(self.device)
+            
+            # Extract embedding
+            with torch.no_grad():
+                embedding = self.recognition_model(face_tensor)
+            
+            # Convert to numpy and normalize
+            embedding = embedding.cpu().numpy().flatten()
+            embedding = embedding / np.linalg.norm(embedding)
+            
+            return embedding
+        
+        except Exception as e:
+            print(f"Error extracting embedding: {e}")
+            return None
 
     def test_camera(self) -> bool:
         """Test if camera is available with robust initialization."""
@@ -93,8 +177,8 @@ class FaceRecognition:
                     break
                 continue
 
-            # Detect faces using InsightFace (RetinaFace + ArcFace)
-            faces = self.face_model.get(frame)
+            # Detect faces using MTCNN
+            faces = self._detect_faces(frame)
 
             status = ""
             color = (255, 255, 255)
@@ -109,29 +193,33 @@ class FaceRecognition:
                 color = (0, 0, 255)
                 countdown = 0
                 # Draw all detected faces
-                for face in faces:
-                    x1, y1, x2, y2 = face.bbox.astype(int)
+                for face_info in faces:
+                    bbox = face_info['bbox']
+                    x1, y1, x2, y2 = [int(v) for v in bbox]
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
 
             else:
-                face = faces[0]
-                bbox = face.bbox.astype(int)
-                confidence = face.det_score
+                face_info = faces[0]
+                bbox = face_info['bbox']
+                confidence = face_info['confidence']
 
                 if confidence >= self.detection_threshold:
                     color = (0, 255, 0)
                     status = f"BON - Maintien position ({countdown}/20)"
                     countdown += 1
 
+                    # Extract embedding from this frame
+                    current_embedding = self._extract_embedding(frame, [int(v) for v in bbox])
+                    
                     # Update best embedding
-                    if confidence > best_quality:
+                    if current_embedding is not None and confidence > best_quality:
                         best_quality = confidence
-                        best_embedding = face.embedding
+                        best_embedding = current_embedding
 
                     # Auto-capture after 20 frames (~0.7s)
                     if countdown >= 20:
                         status = "CAPTURE RÉUSSIE!"
-                        x1, y1, x2, y2 = bbox
+                        x1, y1, x2, y2 = [int(v) for v in bbox]
                         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3)
                         cv2.putText(frame, status, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
                         cv2.imshow('Enregistrement - Q pour quitter', frame)
@@ -143,7 +231,7 @@ class FaceRecognition:
                     countdown = max(0, countdown - 1)
 
                 # Draw face box
-                x1, y1, x2, y2 = bbox
+                x1, y1, x2, y2 = [int(v) for v in bbox]
                 cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3)
 
                 # Progress bar
@@ -170,6 +258,39 @@ class FaceRecognition:
             return best_embedding, "Succès"
         else:
             return None, "Échec de capture"
+
+    def detect_and_extract_face(self, frame: np.ndarray) -> Optional[Tuple[np.ndarray, dict]]:
+        """Detect a single face in the frame and extract its embedding.
+        Args:
+            frame: Input frame from camera
+        Returns: (embedding_vector, face_info) or (None, None)
+            face_info contains: {'bbox': [x1, y1, x2, y2], 'confidence': float}
+        """
+        try:
+            # Detect faces using MTCNN
+            faces = self._detect_faces(frame)
+            
+            if len(faces) != 1:
+                return None, None
+            
+            face_info = faces[0]
+            bbox = face_info['bbox']
+            confidence = face_info['confidence']
+            
+            if confidence < self.detection_threshold:
+                return None, None
+            
+            # Extract embedding
+            embedding = self._extract_embedding(frame, [int(v) for v in bbox])
+            
+            if embedding is None:
+                return None, None
+            
+            return embedding, face_info
+        
+        except Exception as e:
+            print(f"Error in detect_and_extract_face: {e}")
+            return None, None
 
     def capture_face_for_recognition(self) -> Optional[Tuple[np.ndarray, np.ndarray]]:
         """Capture a face for recognition and return embedding vector and raw frame.
@@ -216,21 +337,24 @@ class FaceRecognition:
 
             consecutive_failures = 0
 
-            # Detect faces using InsightFace (RetinaFace + ArcFace)
-            faces = self.face_model.get(frame)
+            # Detect faces using MTCNN
+            faces = self._detect_faces(frame)
 
             if len(faces) == 1:
-                face = faces[0]
-                bbox = face.bbox.astype(int)
-                confidence = face.det_score
+                face_info = faces[0]
+                bbox = face_info['bbox']
+                confidence = face_info['confidence']
 
                 if confidence >= self.detection_threshold:
-                    captured_embedding = face.embedding
-                    raw_frame = frame.copy()
-
-                    x1, y1, x2, y2 = bbox
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    cv2.putText(frame, "Identification en cours...", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    # Extract embedding
+                    captured_embedding = self._extract_embedding(frame, [int(v) for v in bbox])
+                    
+                    if captured_embedding is not None:
+                        raw_frame = frame.copy()
+                        
+                        x1, y1, x2, y2 = [int(v) for v in bbox]
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                        cv2.putText(frame, "Identification en cours...", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                 else:
                     cv2.putText(frame, "Visage détecté mais faible confiance", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
 
@@ -260,14 +384,16 @@ class FaceRecognition:
             # Reconstruct stored embedding
             stored_embedding = np.frombuffer(stored_embedding_bytes, dtype=np.float32)
 
+            # Normalize both embeddings
+            stored_embedding = stored_embedding / np.linalg.norm(stored_embedding)
+            captured_embedding = captured_embedding / np.linalg.norm(captured_embedding)
+
             # Calculate cosine similarity between embeddings
-            similarity = np.dot(stored_embedding, captured_embedding) / (
-                np.linalg.norm(stored_embedding) * np.linalg.norm(captured_embedding)
-            )
+            similarity = np.dot(stored_embedding, captured_embedding)
 
             # Convert similarity to confidence percentage
-            # Using a calibrated mapping: similarity 0.4 -> 0%, similarity 0.8 -> 100%
-            # This provides a monotonic mapping from similarity to percentage
+            # FaceNet embeddings typically range from 0.3 to 1.0 for matches
+            # Threshold of 0.6 is a good balance
             if similarity <= self.similarity_threshold:
                 confidence = 0.0
             else:

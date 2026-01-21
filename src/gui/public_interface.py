@@ -482,11 +482,15 @@ class PublicInterface(QWidget):
             self.display_frame(frame)
 
     def process_face_frame(self, frame):
-        """Detect and process faces using RetinaFace and ArcFace"""
-        # Use the FaceRecognition class for consistent processing
-        captured_embedding, raw_frame = self.face_recognizer.capture_face_for_recognition()
+        """Detect and process faces using MTCNN and FaceNet"""
+        # Detect and extract face from the current frame
+        result = self.face_recognizer.detect_and_extract_face(frame)
         
-        if captured_embedding is not None and raw_frame is not None:
+        if result[0] is not None:
+            captured_embedding, face_info = result
+            bbox = face_info['bbox']
+            x1, y1, x2, y2 = [int(v) for v in bbox]
+            
             # Get all employees with faces
             all_employees = self.db.get_all_employees()
             best_match = None
@@ -503,51 +507,36 @@ class PublicInterface(QWidget):
                         print(f"Error matching face for {emp.name}: {e}")
                         continue
             
+            # Draw face box
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            
             # Process the result
             if best_match and self.face_recognizer.is_match_accepted(best_confidence):
-                self.handle_successful_face_recognition(best_match, best_confidence, raw_frame)
+                status = f"{best_match.name} - {best_confidence:.1f}%"
+                color = (0, 255, 0)  # Green
+                cv2.putText(frame, status, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                
+                # Check cooldown before processing attendance
+                current_time = datetime.datetime.now()
+                if self.last_scan_time is None or (current_time - self.last_scan_time).seconds >= 3:
+                    self.last_scan_time = current_time
+                    self.handle_successful_face_recognition(best_match, best_confidence, frame)
             else:
                 # Show frame with status
                 if best_match:
                     status = f"Confiance insuffisante: {best_confidence:.1f}%"
                     color = (0, 165, 255)  # Orange
                 else:
-                    status = "Aucun employé reconnu"
+                    status = "Non reconnu"
                     color = (0, 0, 255)  # Red
                 
-                cv2.putText(raw_frame, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-                self.display_frame(raw_frame)
+                cv2.putText(frame, status, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
         else:
-            # No face detected or captured
+            # No face detected or low confidence
             cv2.putText(frame, "Positionnez votre visage face à la caméra", (10, 30), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2)
-            self.display_frame(frame)
-                cv2.putText(frame, f"{best_match.name}", (x, y-10), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                cv2.putText(frame, f"{best_confidence:.0f}%", (x, y+h+25), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                
-                self.display_frame(frame)
-                
-                # Process attendance
-                self.last_scan_time = datetime.datetime.now()
-                self.process_face_attendance(best_match.employee_id, best_confidence)
-            else:
-                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 165, 255), 2)
-                cv2.putText(frame, "Visage non reconnu", (50, 50), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
-                self.display_frame(frame)
-                
-        elif len(faces) == 0:
-            cv2.putText(frame, "Aucun visage", (50, 50), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
-            self.display_frame(frame)
-        else:
-            cv2.putText(frame, "Plusieurs visages", (50, 50), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
-            for (x, y, w, h) in faces:
-                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 0, 255), 2)
-            self.display_frame(frame)
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
+        self.display_frame(frame)
 
     def display_frame(self, frame):
         """Display camera frame in label"""
