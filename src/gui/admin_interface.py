@@ -501,6 +501,25 @@ class AdminInterface(QWidget):
         methods_layout.addWidget(self.face_enabled)
 
         layout.addLayout(methods_layout)
+        
+        # Security Section
+        security_group = QGroupBox("🔒 Sécurité")
+        security_layout = QVBoxLayout()
+        
+        security_desc = QLabel("Mot de passe pour accéder à l'interface administrateur")
+        security_desc.setStyleSheet("color: #7F8C8D; font-size: 11px; padding: 5px;")
+        security_layout.addWidget(security_desc)
+        
+        change_pwd_btn = QPushButton("🔑 Changer le mot de passe administrateur")
+        change_pwd_btn.clicked.connect(self.change_admin_password)
+        security_layout.addWidget(change_pwd_btn)
+        
+        security_info = QLabel("⚠️ Après 3 tentatives échouées, une photo de sécurité sera prise")
+        security_info.setStyleSheet("color: #E67E22; font-size: 11px; padding: 5px; font-weight: bold;")
+        security_layout.addWidget(security_info)
+        
+        security_group.setLayout(security_layout)
+        layout.addWidget(security_group)
 
         save_btn = QPushButton("Enregistrer les paramètres")
         save_btn.clicked.connect(self.save_settings)
@@ -1990,6 +2009,73 @@ class AdminInterface(QWidget):
             self.logs_table.setItem(row, 3, QTableWidgetItem(str(log[4])))  # timestamp
             self.logs_table.setItem(row, 4, QTableWidgetItem(log[6]))  # method
             self.logs_table.setItem(row, 5, QTableWidgetItem(log[3] if log[3] else "N/A"))  # terminal_id
+
+    def change_admin_password(self):
+        """Change the admin password with verification"""
+        import hashlib
+        from PyQt5.QtWidgets import QInputDialog
+        
+        # Get the stored password hash (default is SHA-256 hash of "admin")
+        stored_hash = self.db.get_setting('admin_password')
+        if not stored_hash:
+            stored_hash = hashlib.sha256("admin".encode()).hexdigest()
+            self.db.update_setting('admin_password', stored_hash)
+        
+        # Step 1: Verify current password
+        current_password, ok = QInputDialog.getText(
+            self, 
+            "Mot de passe actuel", 
+            "Entrez le mot de passe administrateur actuel:",
+            QLineEdit.Password
+        )
+        
+        if not ok:
+            return
+        
+        # Hash the entered current password and verify
+        current_hash = hashlib.sha256(current_password.encode()).hexdigest()
+        if current_hash != stored_hash:
+            QMessageBox.warning(self, "Erreur", "❌ Mot de passe actuel incorrect!")
+            return
+        
+        # Step 2: Get new password
+        new_password, ok = QInputDialog.getText(
+            self, 
+            "Nouveau mot de passe", 
+            "Entrez le nouveau mot de passe administrateur:\n(Minimum 4 caractères)",
+            QLineEdit.Password
+        )
+        
+        if not ok:
+            return
+        
+        # Validate password length
+        if len(new_password) < 4:
+            QMessageBox.warning(self, "Erreur", "❌ Le mot de passe doit contenir au moins 4 caractères!")
+            return
+        
+        # Step 3: Confirm new password
+        confirm_password, ok = QInputDialog.getText(
+            self, 
+            "Confirmer le mot de passe", 
+            "Confirmez le nouveau mot de passe:",
+            QLineEdit.Password
+        )
+        
+        if not ok:
+            return
+        
+        # Verify passwords match
+        if new_password != confirm_password:
+            QMessageBox.warning(self, "Erreur", "❌ Les mots de passe ne correspondent pas!")
+            return
+        
+        # Hash and save the new password
+        new_hash = hashlib.sha256(new_password.encode()).hexdigest()
+        self.db.update_setting('admin_password', new_hash)
+        
+        QMessageBox.information(self, "Succès", "✅ Mot de passe administrateur changé avec succès!\n\n"
+                                              "Le nouveau mot de passe sera requis lors de la prochaine connexion.")
 
     def save_settings(self):
         # Save time windows

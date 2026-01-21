@@ -4,13 +4,15 @@ Le mode est défini par l'admin, la caméra est toujours active, pas d'interacti
 """
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
-                             QPushButton, QMessageBox, QSpacerItem, QSizePolicy)
+                             QPushButton, QMessageBox, QSpacerItem, QSizePolicy, QInputDialog)
 from PyQt5.QtCore import Qt, QTimer, QDateTime, pyqtSignal
 from PyQt5.QtGui import QFont, QPalette, QColor, QPixmap, QImage
 import datetime
 import os
 import cv2
 import numpy as np
+import hashlib
+from pathlib import Path
 from database import Database
 from utils.qr_scanner import QRScanner
 from utils.face_recognition import FaceRecognition
@@ -826,10 +828,8 @@ class PublicInterface(QWidget):
             if self.f11_press_count == 1:
                 self.f11_reset_timer.start(2000)
             elif self.f11_press_count >= 5:
-                from gui.admin_interface import AdminInterface
-                self.admin_window = AdminInterface(self.db, self)
-                self.admin_window.show()
-                self.hide()
+                # Show password dialog before opening admin
+                self.open_admin_with_password()
                 self.f11_press_count = 0
                 self.f11_reset_timer.stop()
         elif event.key() == Qt.Key_Tab:
@@ -838,11 +838,94 @@ class PublicInterface(QWidget):
             event.accept()
         elif event.key() == Qt.Key_Escape:
             pass  # Ignore escape
+    
+    def open_admin_with_password(self):
+        """Open admin interface with password protection"""
+        # Get stored admin password (default: admin)
+        stored_password = self.db.get_setting('admin_password')
+        if not stored_password:
+            # Set default password
+            stored_password = hashlib.sha256('admin'.encode()).hexdigest()
+            self.db.update_setting('admin_password', stored_password)
+        
+        max_attempts = 3
+        attempts = 0
+        
+        while attempts < max_attempts:
+            password, ok = QInputDialog.getText(
+                self,
+                "Accès Administrateur",
+                f"Entrez le mot de passe administrateur:\n(Tentative {attempts + 1}/{max_attempts})",
+                QLineEdit.Password
+            )
+            
+            if not ok:
+                # User cancelled
+                return
+            
+            # Hash the entered password
+            hashed_password = hashlib.sha256(password.encode()).hexdigest()
+            
+            if hashed_password == stored_password:
+                # Correct password - open admin interface
+                from gui.admin_interface import AdminInterface
+                self.admin_window = AdminInterface(self.db, self)
+                self.admin_window.show()
+                self.hide()
+                return
+            else:
+                attempts += 1
+                if attempts < max_attempts:
+                    QMessageBox.warning(
+                        self,
+                        "Erreur",
+                        f"❌ Mot de passe incorrect!\n\nTentatives restantes: {max_attempts - attempts}"
+                    )
+        
+        # 3 failed attempts - take photo and deny access
+        QMessageBox.critical(
+            self,
+            "Accès refusé",
+            "⚠️ Accès refusé!\n\n📸 Une photo a été prise pour des raisons de sécurité."
+        )
+        self.capture_intruder_photo()
 
     def reset_f11_count(self):
         """Reset F11 press counter"""
         self.f11_press_count = 0
         self.f11_reset_timer.stop()
+    
+    def capture_intruder_photo(self):
+        """Capture photo of person attempting unauthorized admin access"""
+        try:
+            if self.camera is None or not self.camera.isOpened():
+                print("⚠️ Camera not available for intruder photo")
+                return
+            
+            # Capture frame from camera
+            ret, frame = self.camera.read()
+            if not ret or frame is None:
+                print("⚠️ Failed to capture intruder photo")
+                return
+            
+            # Create security photos directory
+            security_dir = Path("data/security_photos")
+            security_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Save photo with timestamp
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            photo_path = security_dir / f"intruder_{timestamp}.jpg"
+            
+            cv2.imwrite(str(photo_path), frame)
+            print(f"📸 Intruder photo saved: {photo_path}")
+            
+            # Log the security event
+            log_path = security_dir / "security_log.txt"
+            with open(log_path, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Failed admin access attempt - Photo: {photo_path.name}\n")
+            
+        except Exception as e:
+            print(f"⚠️ Error capturing intruder photo: {e}")
 
     def closeEvent(self, event):
         """Cleanup on close"""
