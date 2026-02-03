@@ -150,20 +150,10 @@ class EmployeeProfileDialog(QDialog):
                 QMessageBox.critical(self, "Erreur", f"Échec de génération du code QR : {str(e)}")
                 return
             
-        # Regenerate QR code image from employee_id
-        import qrcode
-        from io import BytesIO
+        # Generate QR code image with text overlays
+        from utils.qr_generator import generate_qr_with_text
         
-        qr = qrcode.QRCode(version=1, box_size=10, border=5)
-        qr.add_data(self.employee.employee_id)
-        qr.make(fit=True)
-        
-        img = qr.make_image(fill_color="black", back_color="white")
-        
-        # Convert to QPixmap
-        buffer = BytesIO()
-        img.save(buffer, format='PNG')
-        qr_bytes = buffer.getvalue()
+        qr_bytes = generate_qr_with_text(self.employee.employee_id, self.employee.name)
         
         qr_image = QImage()
         qr_image.loadFromData(qr_bytes)
@@ -179,11 +169,6 @@ class EmployeeProfileDialog(QDialog):
         qr_label = QLabel()
         qr_label.setPixmap(qr_pixmap.scaled(250, 250, Qt.KeepAspectRatio))
         layout.addWidget(qr_label, alignment=Qt.AlignCenter)
-        
-        # Employee info
-        info_label = QLabel(f"Employee: {self.employee.name}\nID: {self.employee.employee_id}")
-        info_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(info_label)
         
         # Save button
         save_btn = QPushButton("Save QR Image")
@@ -372,6 +357,29 @@ class AdminInterface(QWidget):
         info_label = QLabel("💡 L'ID employé sera généré automatiquement (Format: FP-XXXXXX)")
         info_label.setStyleSheet("color: #7F8C8D; font-size: 11px; padding: 5px;")
         layout.addWidget(info_label)
+
+        # Bulk Actions
+        bulk_layout = QHBoxLayout()
+        
+        generate_all_qr_btn = QPushButton("� Générer ZIP des codes QR")
+        generate_all_qr_btn.setToolTip("Générer tous les codes QR et créer un fichier ZIP avec les images")
+        generate_all_qr_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498DB;
+                color: white;
+                padding: 8px 16px;
+                font-weight: bold;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #2980B9;
+            }
+        """)
+        generate_all_qr_btn.clicked.connect(self.generate_all_qr_codes)
+        bulk_layout.addWidget(generate_all_qr_btn)
+        
+        bulk_layout.addStretch()  # Push button to the left
+        layout.addLayout(bulk_layout)
 
         # Employee List
         self.employee_table = QTableWidget()
@@ -2168,6 +2176,74 @@ class AdminInterface(QWidget):
                 self.load_employees()
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Échec de génération du code QR : {str(e)}")
+    
+    def generate_all_qr_codes(self):
+        """Generate QR codes for all employees and create a ZIP file with all images"""
+        employees = self.db.get_all_employees()
+        
+        if not employees:
+            QMessageBox.information(self, "Info", "Aucun employé trouvé.")
+            return
+        
+        # Confirm generation
+        reply = QMessageBox.question(
+            self, 
+            "Confirmation", 
+            f"Générer les codes QR pour tous les {len(employees)} employé(s) et créer un fichier ZIP ?\n\n"
+            "Cela régénérera tous les codes QR existants.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        
+        if reply == QMessageBox.Yes:
+            import zipfile
+            from io import BytesIO
+            from utils.qr_generator import generate_qr_with_text
+            
+            # Choose save location for ZIP file
+            zip_filename, _ = QFileDialog.getSaveFileName(
+                self,
+                "Enregistrer le fichier ZIP des codes QR",
+                "QR_Codes_All_Employees.zip",
+                "ZIP Files (*.zip)"
+            )
+            
+            if not zip_filename:
+                return
+            
+            try:
+                generated_count = 0
+                errors = []
+                
+                with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    for emp in employees:
+                        try:
+                            # Generate QR with text overlay
+                            qr_bytes = generate_qr_with_text(emp.employee_id, emp.name)
+                            
+                            # Add to ZIP with filename like "QR_FP-123456_Name.png"
+                            safe_name = emp.name.replace(' ', '_').replace('/', '_')
+                            filename = f"QR_{emp.employee_id}_{safe_name}.png"
+                            zipf.writestr(filename, qr_bytes)
+                            
+                            # Also save to database if not exists
+                            if not emp.qr_code:
+                                self.db.generate_qr_code(emp.employee_id)
+                            
+                            generated_count += 1
+                        except Exception as e:
+                            errors.append(f"{emp.name}: {str(e)}")
+                
+                # Show results
+                message = f"Fichier ZIP créé avec succès : {zip_filename}\n\nCodes QR générés : {generated_count}"
+                if errors:
+                    message += f"\n\nErreurs ({len(errors)}) :\n" + "\n".join(errors)
+                
+                QMessageBox.information(self, "Succès", message)
+                self.load_employees()
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Erreur", f"Échec de création du fichier ZIP : {str(e)}")
     
     def set_face(self, employee_id):
         """Set face image for employee using camera"""
