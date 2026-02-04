@@ -952,11 +952,11 @@ class AdminInterface(QWidget):
     
     def create_pdf_export_section(self):
         """Create PDF daily attendance sheet export section"""
-        group = QGroupBox("📄 Fiche de Présence PDF")
+        group = QGroupBox("📄 Fiche de Présence (PDF / Excel)")
         layout = QVBoxLayout()
         
         # Description
-        desc_label = QLabel("Exportez la fiche de présence journalière en PDF")
+        desc_label = QLabel("Exportez la fiche de présence journalière en PDF ou Excel")
         desc_label.setStyleSheet("color: #555; font-style: italic; margin-bottom: 10px;")
         layout.addWidget(desc_label)
         
@@ -977,7 +977,7 @@ class AdminInterface(QWidget):
         h_layout.addSpacing(20)
         
         # Export PDF button
-        export_pdf_btn = QPushButton("📥 Exporter Fiche de Présence PDF")
+        export_pdf_btn = QPushButton("📥 Exporter PDF")
         export_pdf_btn.setStyleSheet("""
             QPushButton {
                 background-color: #E74C3C;
@@ -986,7 +986,7 @@ class AdminInterface(QWidget):
                 font-size: 13px;
                 font-weight: bold;
                 border-radius: 5px;
-                min-width: 200px;
+                min-width: 150px;
             }
             QPushButton:hover {
                 background-color: #C0392B;
@@ -994,6 +994,25 @@ class AdminInterface(QWidget):
         """)
         export_pdf_btn.clicked.connect(self.export_attendance_sheet_pdf)
         h_layout.addWidget(export_pdf_btn)
+        
+        # Export Excel button
+        export_excel_btn = QPushButton("📊 Exporter Excel")
+        export_excel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27AE60;
+                color: white;
+                padding: 12px 25px;
+                font-size: 13px;
+                font-weight: bold;
+                border-radius: 5px;
+                min-width: 150px;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+        """)
+        export_excel_btn.clicked.connect(self.export_attendance_sheet_excel)
+        h_layout.addWidget(export_excel_btn)
         
         h_layout.addStretch()
         
@@ -1500,6 +1519,162 @@ class AdminInterface(QWidget):
                 "Installez-la avec: pip install reportlab")
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Échec de l'exportation PDF: {str(e)}")
+    
+    def export_attendance_sheet_excel(self):
+        """Export daily attendance sheet to Excel (Fiche de Présence)"""
+        selected_date = self.pdf_export_date.date().toPyDate()
+        
+        # Get attendance records for the selected day
+        with sqlite3.connect(self.db.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT 
+                    e.name as employee_name,
+                    al.timestamp,
+                    al.type,
+                    al.method
+                FROM attendance_logs al
+                JOIN employees e ON al.employee_id = e.employee_id
+                WHERE DATE(al.timestamp) = ?
+                AND al.status = 'ACCEPTED'
+                ORDER BY e.name, al.timestamp
+            ''', (selected_date.strftime('%Y-%m-%d'),))
+            
+            records = cursor.fetchall()
+        
+        if not records:
+            QMessageBox.warning(self, "Attention", 
+                f"Aucune donnée de présence trouvée pour le {selected_date.strftime('%d/%m/%Y')}")
+            return
+        
+        # Group records by employee
+        from collections import defaultdict
+        employee_records = defaultdict(lambda: {'in': None, 'out': None})
+        
+        for name, timestamp, record_type, method in records:
+            timestamp_dt = datetime.fromisoformat(timestamp)
+            if record_type == 'IN' and employee_records[name]['in'] is None:
+                employee_records[name]['in'] = (timestamp_dt.strftime('%H:%M:%S'), method)
+            elif record_type == 'OUT':
+                employee_records[name]['out'] = (timestamp_dt.strftime('%H:%M:%S'), method)
+        
+        # Get filename
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Exporter Fiche de Présence Excel",
+            f"fiche_presence_{selected_date.strftime('%Y%m%d')}.xlsx",
+            "Excel Files (*.xlsx)"
+        )
+        
+        if not filename:
+            return
+        
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+            
+            # Create workbook
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Fiche de Présence"
+            
+            # Set column widths
+            ws.column_dimensions['A'].width = 30  # Employee Name
+            ws.column_dimensions['B'].width = 15  # Entry Time
+            ws.column_dimensions['C'].width = 18  # Entry Type
+            ws.column_dimensions['D'].width = 15  # Exit Time
+            ws.column_dimensions['E'].width = 18  # Exit Type
+            
+            # Title row
+            ws.merge_cells('A1:E1')
+            title_cell = ws['A1']
+            title_cell.value = f"FICHE DE PRÉSENCE - {selected_date.strftime('%d/%m/%Y')}"
+            title_cell.font = Font(size=16, bold=True, color="FFFFFF")
+            title_cell.fill = PatternFill(start_color="2C3E50", end_color="2C3E50", fill_type="solid")
+            title_cell.alignment = Alignment(horizontal='center', vertical='center')
+            ws.row_dimensions[1].height = 30
+            
+            # Header row
+            headers = ['NOM EMPLOYÉ', "H-D'ENTRÉE", 'TYPE ENTRÉE', 'H-DE SORTIE', 'TYPE SORTIE']
+            header_fill = PatternFill(start_color="3498DB", end_color="3498DB", fill_type="solid")
+            header_font = Font(bold=True, color="FFFFFF", size=12)
+            header_alignment = Alignment(horizontal='center', vertical='center')
+            border = Border(
+                left=Side(style='thin'),
+                right=Side(style='thin'),
+                top=Side(style='thin'),
+                bottom=Side(style='thin')
+            )
+            
+            for col_num, header in enumerate(headers, 1):
+                cell = ws.cell(row=2, column=col_num)
+                cell.value = header
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_alignment
+                cell.border = border
+            
+            ws.row_dimensions[2].height = 25
+            
+            # Data rows
+            data_alignment = Alignment(horizontal='center', vertical='center')
+            row_num = 3
+            
+            for emp_name in sorted(employee_records.keys()):
+                record = employee_records[emp_name]
+                entry_time = record['in'][0] if record['in'] else '-'
+                entry_type = self.format_method_name(record['in'][1]) if record['in'] else '-'
+                exit_time = record['out'][0] if record['out'] else '-'
+                exit_type = self.format_method_name(record['out'][1]) if record['out'] else '-'
+                
+                # Employee name (left aligned)
+                name_cell = ws.cell(row=row_num, column=1)
+                name_cell.value = emp_name
+                name_cell.border = border
+                name_cell.alignment = Alignment(horizontal='left', vertical='center')
+                name_cell.font = Font(size=11)
+                
+                # Times and types (centered)
+                for col_num, value in enumerate([entry_time, entry_type, exit_time, exit_type], 2):
+                    cell = ws.cell(row=row_num, column=col_num)
+                    cell.value = value
+                    cell.border = border
+                    cell.alignment = data_alignment
+                    cell.font = Font(size=11)
+                
+                # Alternate row colors
+                if row_num % 2 == 0:
+                    row_fill = PatternFill(start_color="ECF0F1", end_color="ECF0F1", fill_type="solid")
+                    for col in range(1, 6):
+                        ws.cell(row=row_num, column=col).fill = row_fill
+                
+                ws.row_dimensions[row_num].height = 20
+                row_num += 1
+            
+            # Footer row
+            footer_row = row_num + 1
+            ws.merge_cells(f'A{footer_row}:E{footer_row}')
+            footer_cell = ws[f'A{footer_row}']
+            footer_cell.value = f"Document généré le {datetime.now().strftime('%d/%m/%Y à %H:%M')} - SLAT v1.0"
+            footer_cell.font = Font(size=9, italic=True, color="7F8C8D")
+            footer_cell.alignment = Alignment(horizontal='center', vertical='center')
+            
+            # Save workbook
+            wb.save(filename)
+            
+            # Show success message
+            QMessageBox.information(self, "Succès",
+                f"✅ Fiche de présence Excel générée avec succès!\n\n"
+                f"📁 Fichier: {filename}\n"
+                f"📅 Date: {selected_date.strftime('%d/%m/%Y')}\n"
+                f"👥 Employés: {len(employee_records)}")
+            
+        except ImportError:
+            QMessageBox.critical(self, "Erreur", 
+                "La bibliothèque openpyxl n'est pas installée.\n\n"
+                "Installez-la avec: pip install openpyxl")
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Échec de l'exportation Excel: {str(e)}")
     
     def format_method_name(self, method):
         """Format method name for display"""

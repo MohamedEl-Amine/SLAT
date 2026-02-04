@@ -1,5 +1,78 @@
 # Public Interface Updates
 
+## Latest Changes
+
+### ⭐ Camera Lifecycle Management (February 3, 2026)
+**Session-based camera activation with automatic extension**
+
+#### Key Features
+- **🔒 Security First**: Camera disabled outside working hours
+- **⌨️ Manual Activation**: Press SPACE or ENTER to activate camera
+- **⏱️ 2-Minute Sessions**: Camera stays active for exactly 2 minutes
+- **🔄 Auto-Extension**: Each successful scan extends session by 2 minutes
+- **📊 Visual Feedback**: Real-time countdown with color-coded timer
+- **⚡ Auto-Shutdown**: Camera closes automatically when timer expires
+
+#### How It Works
+
+**1. Working Window Detection**
+- Camera only available during morning/afternoon attendance windows
+- Outside hours: Shows working schedule and blocks activation
+- Inside hours: Shows activation instructions
+
+**2. Camera Activation**
+- Press **SPACE** or **ENTER** key to activate
+- Camera initializes and shows live feed
+- 2-minute countdown timer starts
+- Timer displayed with color coding:
+  - 🟢 **Green** (✓): > 60 seconds remaining
+  - 🟠 **Orange** (⚠): 30-60 seconds remaining
+  - 🔴 **Red** (⏰): < 30 seconds remaining
+
+**3. Session Extension**
+- Each QR scan → Timer resets to 02:00
+- Each face recognition → Timer resets to 02:00
+- Multiple employees can use same session
+- No need to reactivate between users
+
+**4. Automatic Deactivation**
+- When timer reaches 00:00:
+  - Camera closes immediately
+  - Resources released
+  - Shows reactivation instructions
+- Simply press SPACE/ENTER again to restart
+
+#### Benefits
+✅ **Privacy-Focused**: Camera never runs without explicit activation
+✅ **Energy Efficient**: Automatic shutdown saves resources
+✅ **Multi-User Friendly**: Session extends with each scan
+✅ **Transparent**: Users always see camera status
+✅ **Secure**: Enforces working hour restrictions
+✅ **Predictable**: Clear countdown and visual feedback
+
+#### User Experience
+
+**Scenario: Morning Arrival**
+```
+08:00 - Press SPACE → Camera ON, Timer: 02:00 🟢
+08:01 - Employee A scans → Timer: 02:00 🟢 (extended)
+08:02 - Employee B scans → Timer: 02:00 🟢 (extended)
+08:03 - Employee C scans → Timer: 02:00 🟢 (extended)
+08:04 - No activity...
+08:05 - No activity...
+08:06 - Timer: 00:00 → Camera OFF
+```
+
+**Result**: 3 employees processed in one session!
+
+#### Documentation
+- 📖 [Camera Lifecycle Validation](CAMERA_LIFECYCLE_VALIDATION.md)
+- 📘 [Camera User Guide](CAMERA_USER_GUIDE.md)
+- 📊 [Camera Lifecycle Diagram](CAMERA_LIFECYCLE_DIAGRAM.md)
+- 📋 [Implementation Summary](CAMERA_LIFECYCLE_SUMMARY.md)
+
+---
+
 ## What's New
 
 ### 1. Method Selection Interface

@@ -6,7 +6,7 @@ Le mode est défini par l'admin, la caméra est toujours active, pas d'interacti
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                              QPushButton, QMessageBox, QSpacerItem, QSizePolicy, QInputDialog)
 from PyQt5.QtCore import Qt, QTimer, QDateTime, pyqtSignal
-from PyQt5.QtGui import QFont, QPalette, QColor, QPixmap, QImage
+from PyQt5.QtGui import QFont, QPalette, QColor, QPixmap, QImage, QPainter, QPen
 import datetime
 import os
 import cv2
@@ -21,7 +21,11 @@ class PublicInterface(QWidget):
     def __init__(self):
         super().__init__()
         self.db = Database()
-        self.face_recognizer = FaceRecognition()
+        # Initialize face recognizer only if face recognition is enabled
+        if self.db.get_setting('face_enabled') == '1':
+            self.face_recognizer = FaceRecognition()
+        else:
+            self.face_recognizer = None
         self.setWindowTitle("SLAT - Terminal de Présence")
         self.showFullScreen()
         self.f11_press_count = 0
@@ -35,6 +39,18 @@ class PublicInterface(QWidget):
         self.last_scan_time = None
         self.scan_cooldown = 3  # seconds between scans
         self.current_frame = None  # Store current frame for photo capture
+        
+        # Camera lifecycle management (session-based)
+        self.camera_active = False  # Is camera currently active
+        self.camera_session_timer = QTimer()  # Timer for 2-minute camera timeout
+        self.camera_session_timer.timeout.connect(self.on_camera_session_timeout)
+        self.camera_session_duration = 120  # 2 minutes in seconds
+        self.camera_session_remaining = 0  # Remaining seconds
+        
+        # Countdown display timer (updates every second)
+        self.countdown_timer = QTimer()
+        self.countdown_timer.timeout.connect(self.update_camera_countdown)
+        self.countdown_timer.setInterval(1000)  # Update every second
         
         # Create photos directory
         self.photos_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'photos')
@@ -158,6 +174,22 @@ class PublicInterface(QWidget):
         """)
         self.camera_label.hide()
         self.left_layout.addWidget(self.camera_label, 0, Qt.AlignCenter)
+        
+        # Camera session countdown display
+        self.camera_countdown_label = QLabel()
+        self.camera_countdown_label.setFont(QFont("Arial", 12, QFont.Bold))
+        self.camera_countdown_label.setAlignment(Qt.AlignCenter)
+        self.camera_countdown_label.setStyleSheet("color: #E67E22; padding: 5px;")
+        self.camera_countdown_label.hide()
+        self.left_layout.addWidget(self.camera_countdown_label, 0, Qt.AlignCenter)
+        
+        # Camera activation instruction
+        self.camera_instruction_label = QLabel()
+        self.camera_instruction_label.setFont(QFont("Arial", 14))
+        self.camera_instruction_label.setAlignment(Qt.AlignCenter)
+        self.camera_instruction_label.setStyleSheet("color: #3498DB; padding: 10px;")
+        self.camera_instruction_label.hide()
+        self.left_layout.addWidget(self.camera_instruction_label, 0, Qt.AlignCenter)
         
         # ID input area (for card mode)
         self.id_container = QWidget()
@@ -342,11 +374,21 @@ class PublicInterface(QWidget):
 
     def stop_current_mode(self):
         """Stop camera and timers for current mode"""
+        # Use the deactivate_camera method to properly clean up
+        if self.camera_active:
+            self.deactivate_camera()
+        
+        # Additional cleanup
         if self.camera:
             self.camera.release()
             self.camera = None
         if self.camera_timer.isActive():
             self.camera_timer.stop()
+        
+        # Hide camera-related UI elements
+        self.camera_instruction_label.hide()
+        self.camera_countdown_label.hide()
+        
         self.clear_status()
 
     def initialize_camera(self):
@@ -379,32 +421,54 @@ class PublicInterface(QWidget):
     def start_qr_mode(self):
         """Start QR scanning mode"""
         self.mode_label.setText("🔲 MODE SCAN QR")
-        self.camera_label.show()
+        self.camera_label.hide()  # Don't show camera until activated
         self.id_container.hide()
         
-        # Start camera with error handling
-        if self.initialize_camera():
-            self.camera_timer.start(30)  # ~33 FPS
-            self.show_status("📷 Caméra initialisée - Présentez votre QR code", "info", auto_clear=True)
+        # Check if we're in a working window
+        if self.is_in_working_window():
+            # Show instruction to activate camera
+            self.camera_instruction_label.setText(
+                "⌨️ Appuyez sur ESPACE ou ENTRÉE pour activer la caméra\n\n"
+                "⏱️ La caméra restera active pendant 2 minutes\n"
+                "📱 Chaque scan prolonge de 2 minutes"
+            )
+            self.camera_instruction_label.show()
+            self.show_status("⌨️ Appuyez sur ESPACE ou ENTRÉE pour démarrer", "info")
         else:
-            self.show_status("❌ Erreur caméra - Vérifiez la connexion\n\nUtilisez le mode Carte ID", "error")
-            # Auto-switch to card mode after 5 seconds
-            QTimer.singleShot(5000, lambda: self.switch_to_next_method())
+            # Outside working window
+            self.camera_instruction_label.setText(
+                "⏰ Caméra désactivée en dehors des fenêtres horaires\n\n"
+                "Plages actives:\n" +
+                self.get_working_windows_text()
+            )
+            self.camera_instruction_label.show()
+            self.show_status("⏰ Hors fenêtre horaire", "error")
 
     def start_face_mode(self):
         """Start face recognition mode"""
         self.mode_label.setText("👤 MODE RECONNAISSANCE FACIALE")
-        self.camera_label.show()
+        self.camera_label.hide()  # Don't show camera until activated
         self.id_container.hide()
         
-        # Start camera with error handling
-        if self.initialize_camera():
-            self.camera_timer.start(30)
-            self.show_status("📷 Caméra initialisée - Regardez la caméra", "info", auto_clear=True)
+        # Check if we're in a working window
+        if self.is_in_working_window():
+            # Show instruction to activate camera
+            self.camera_instruction_label.setText(
+                "⌨️ Appuyez sur ESPACE ou ENTRÉE pour activer la caméra\n\n"
+                "⏱️ La caméra restera active pendant 2 minutes\n"
+                "👤 Chaque reconnaissance prolonge de 2 minutes"
+            )
+            self.camera_instruction_label.show()
+            self.show_status("⌨️ Appuyez sur ESPACE ou ENTRÉE pour démarrer", "info")
         else:
-            self.show_status("❌ Erreur caméra - Vérifiez la connexion\n\nUtilisez le mode Carte ID", "error")
-            # Auto-switch to card mode after 5 seconds
-            QTimer.singleShot(5000, lambda: self.switch_to_next_method())
+            # Outside working window
+            self.camera_instruction_label.setText(
+                "⏰ Caméra désactivée en dehors des fenêtres horaires\n\n"
+                "Plages actives:\n" +
+                self.get_working_windows_text()
+            )
+            self.camera_instruction_label.show()
+            self.show_status("⏰ Hors fenêtre horaire", "error")
 
     def start_card_mode(self):
         """Start ID card input mode"""
@@ -493,6 +557,8 @@ class PublicInterface(QWidget):
 
     def process_face_frame(self, frame):
         """Detect and process faces using MTCNN and FaceNet"""
+        if self.face_recognizer is None:
+            return
         # Detect and extract face from the current frame
         result = self.face_recognizer.detect_and_extract_face(frame)
         
@@ -574,6 +640,10 @@ class PublicInterface(QWidget):
         
         # Check window and record
         self.record_attendance(employee, frame=frame)
+        
+        # Extend camera session on successful scan
+        if self.camera_active:
+            self.extend_camera_session()
 
     def handle_successful_face_recognition(self, employee, confidence, frame):
         """Handle successful face recognition"""
@@ -605,6 +675,10 @@ class PublicInterface(QWidget):
         
         # Check window and record
         self.record_attendance(employee, extra_info=f"Confiance: {confidence:.0f}%", frame=frame, confidence=confidence)
+        
+        # Extend camera session on successful recognition
+        if self.camera_active:
+            self.extend_camera_session()
 
     def process_id_input(self):
         """Process ID card input"""
@@ -820,6 +894,12 @@ class PublicInterface(QWidget):
         else:
             self.window_info_label.setText("⏰ Aucune fenêtre active")
             self.window_info_label.setStyleSheet("color: #95A5A6; padding: 5px;")
+        
+        # SECURITY: Force-close camera if we're outside working window
+        if self.camera_active and not self.is_in_working_window():
+            print("⚠️ Working window ended - Force closing camera for security")
+            self.deactivate_camera()
+            self.show_status("⏰ Fenêtre horaire terminée - Caméra désactivée", "error", auto_clear=True)
 
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts"""
@@ -835,6 +915,15 @@ class PublicInterface(QWidget):
         elif event.key() == Qt.Key_Tab:
             # Switch to next enabled method
             self.switch_to_next_method()
+            event.accept()
+        elif event.key() == Qt.Key_Space or event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+            # Activate camera if in QR or Face mode and within working window
+            mode = self.db.get_setting('attendance_mode')
+            if mode in ['qr', 'face'] and not self.camera_active:
+                if self.is_in_working_window():
+                    self.activate_camera()
+                else:
+                    self.show_status("⏰ Hors fenêtre horaire - Caméra désactivée", "error", auto_clear=True)
             event.accept()
         elif event.key() == Qt.Key_Escape:
             pass  # Ignore escape
@@ -897,13 +986,36 @@ class PublicInterface(QWidget):
     
     def capture_intruder_photo(self):
         """Capture photo of person attempting unauthorized admin access"""
+        temp_camera = None
+        camera_was_active = self.camera_active
+        
         try:
-            if self.camera is None or not self.camera.isOpened():
+            # Use existing camera if active, otherwise temporarily activate
+            if self.camera is not None and self.camera.isOpened():
+                temp_camera = self.camera
+            else:
+                # Temporarily activate camera for security photo
+                print("📸 Temporarily activating camera for security photo")
+                for camera_index in [0, 1, 2]:
+                    try:
+                        temp_camera = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+                        if temp_camera.isOpened():
+                            ret, test_frame = temp_camera.read()
+                            if ret and test_frame is not None:
+                                break
+                            else:
+                                temp_camera.release()
+                                temp_camera = None
+                    except Exception as e:
+                        print(f"Camera {camera_index} failed: {e}")
+                        continue
+            
+            if temp_camera is None or not temp_camera.isOpened():
                 print("⚠️ Camera not available for intruder photo")
                 return
             
             # Capture frame from camera
-            ret, frame = self.camera.read()
+            ret, frame = temp_camera.read()
             if not ret or frame is None:
                 print("⚠️ Failed to capture intruder photo")
                 return
@@ -926,6 +1038,153 @@ class PublicInterface(QWidget):
             
         except Exception as e:
             print(f"⚠️ Error capturing intruder photo: {e}")
+        finally:
+            # Clean up temporary camera if we created one
+            if not camera_was_active and temp_camera is not None and temp_camera != self.camera:
+                temp_camera.release()
+                print("📸 Temporary camera released")
+
+    def is_in_working_window(self):
+        """Check if current time is within working windows"""
+        now = datetime.datetime.now()
+        current_time = now.time()
+        
+        morning_start = datetime.datetime.strptime(self.db.get_setting('morning_start'), '%H:%M').time()
+        morning_end = datetime.datetime.strptime(self.db.get_setting('morning_end'), '%H:%M').time()
+        afternoon_start = datetime.datetime.strptime(self.db.get_setting('afternoon_start'), '%H:%M').time()
+        afternoon_end = datetime.datetime.strptime(self.db.get_setting('afternoon_end'), '%H:%M').time()
+        
+        in_morning = morning_start <= current_time <= morning_end
+        in_afternoon = afternoon_start <= current_time <= afternoon_end
+        
+        return in_morning or in_afternoon
+    
+    def get_working_windows_text(self):
+        """Get formatted text of working windows"""
+        morning_start = self.db.get_setting('morning_start')
+        morning_end = self.db.get_setting('morning_end')
+        afternoon_start = self.db.get_setting('afternoon_start')
+        afternoon_end = self.db.get_setting('afternoon_end')
+        
+        return f"Matin: {morning_start} - {morning_end}\nAprès-midi: {afternoon_start} - {afternoon_end}"
+    
+    def activate_camera(self):
+        """Activate camera and start session timer"""
+        # Check if already active
+        if self.camera_active:
+            return
+        
+        # Initialize camera
+        if self.initialize_camera():
+            self.camera_active = True
+            self.camera_label.show()
+            self.camera_instruction_label.hide()
+            
+            # Start camera frame processing
+            self.camera_timer.start(30)  # ~33 FPS
+            
+            # Start session timer (2 minutes)
+            self.camera_session_remaining = self.camera_session_duration
+            self.camera_session_timer.start(self.camera_session_duration * 1000)  # milliseconds
+            
+            # Start countdown display timer
+            self.countdown_timer.start()
+            self.update_camera_countdown()
+            self.camera_countdown_label.show()
+            
+            mode = self.db.get_setting('attendance_mode')
+            msg = "📷 Caméra activée - Présentez votre QR code" if mode == 'qr' else "📷 Caméra activée - Regardez la caméra"
+            self.show_status(msg, "info", auto_clear=True)
+        else:
+            self.show_status("❌ Erreur caméra - Vérifiez la connexion\n\nUtilisez le mode Carte ID", "error")
+    
+    def deactivate_camera(self):
+        """Deactivate camera and stop timers"""
+        if not self.camera_active:
+            return
+        
+        # Stop camera
+        if self.camera:
+            self.camera.release()
+            self.camera = None
+        
+        # Stop timers
+        if self.camera_timer.isActive():
+            self.camera_timer.stop()
+        if self.camera_session_timer.isActive():
+            self.camera_session_timer.stop()
+        if self.countdown_timer.isActive():
+            self.countdown_timer.stop()
+        
+        # Update UI
+        self.camera_active = False
+        self.camera_label.hide()
+        self.camera_countdown_label.hide()
+        
+        # Show reactivation instructions if still in working window
+        if self.is_in_working_window():
+            mode = self.db.get_setting('attendance_mode')
+            if mode in ['qr', 'face']:
+                self.camera_instruction_label.setText(
+                    "⏱️ Session caméra expirée\n\n"
+                    "⌨️ Appuyez sur ESPACE ou ENTRÉE pour réactiver"
+                )
+                self.camera_instruction_label.show()
+                self.show_status("⏱️ Caméra désactivée - Appuyez sur ESPACE pour réactiver", "info")
+    
+    def extend_camera_session(self):
+        """Extend camera session by 2 minutes after successful scan"""
+        if not self.camera_active:
+            return
+        
+        # Reset session timer
+        self.camera_session_remaining = self.camera_session_duration
+        self.camera_session_timer.stop()
+        self.camera_session_timer.start(self.camera_session_duration * 1000)
+        
+        # Update countdown display
+        self.update_camera_countdown()
+        
+        print("📷 Session caméra prolongée de 2 minutes")
+    
+    def on_camera_session_timeout(self):
+        """Handle camera session timeout"""
+        print("⏱️ Session caméra expirée")
+        self.deactivate_camera()
+    
+    def update_camera_countdown(self):
+        """Update camera countdown display"""
+        if not self.camera_active:
+            return
+        
+        # SECURITY CHECK: Verify we're still in working window
+        if not self.is_in_working_window():
+            print("⚠️ Working window ended during countdown - Force closing camera")
+            self.deactivate_camera()
+            self.show_status("⏰ Fenêtre horaire terminée - Caméra désactivée", "error", auto_clear=True)
+            return
+        
+        # Decrease remaining time
+        if self.camera_session_remaining > 0:
+            self.camera_session_remaining -= 1
+        
+        # Format time as MM:SS
+        minutes = self.camera_session_remaining // 60
+        seconds = self.camera_session_remaining % 60
+        
+        # Update label with color based on remaining time
+        if self.camera_session_remaining > 60:
+            color = "#27AE60"  # Green
+            icon = "✓"
+        elif self.camera_session_remaining > 30:
+            color = "#E67E22"  # Orange
+            icon = "⚠"
+        else:
+            color = "#E74C3C"  # Red
+            icon = "⏰"
+        
+        self.camera_countdown_label.setText(f"{icon} Session: {minutes:02d}:{seconds:02d}")
+        self.camera_countdown_label.setStyleSheet(f"color: {color}; font-weight: bold; padding: 5px;")
 
     def closeEvent(self, event):
         """Cleanup on close"""
