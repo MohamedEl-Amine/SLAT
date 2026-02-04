@@ -12,6 +12,7 @@ import os
 import cv2
 import numpy as np
 import hashlib
+import winsound
 from pathlib import Path
 from database import Database
 from utils.qr_scanner import QRScanner
@@ -81,6 +82,26 @@ class PublicInterface(QWidget):
 
         # Start the appropriate mode
         self.start_attendance_mode()
+
+    def play_sound(self, sound_type):
+        """Play a beep sound for different events"""
+        try:
+            if sound_type == "start":
+                winsound.Beep(600, 300)  # Medium tone for start
+            elif sound_type == "in":
+                # Arrival: ascending tones
+                winsound.Beep(600, 150)
+                winsound.Beep(800, 150)
+            elif sound_type == "out":
+                # Departure: descending tones
+                winsound.Beep(800, 150)
+                winsound.Beep(600, 150)
+            elif sound_type == "error":
+                winsound.Beep(400, 500)  # Low tone for error
+            elif sound_type == "scan":
+                winsound.Beep(700, 150)  # Quick beep for scan detection
+        except Exception as e:
+            print(f"Sound error: {e}")
 
     def setup_header(self):
         """Setup header with logo, title, and time"""
@@ -319,6 +340,9 @@ class PublicInterface(QWidget):
         """Start the terminal in the configured mode"""
         mode = self.db.get_setting('attendance_mode')
         
+        # Play start sound
+        self.play_sound("start")
+        
         # Update method switcher visibility based on enabled methods
         enabled_methods = self.get_enabled_methods()
         if len(enabled_methods) > 1:
@@ -541,6 +565,9 @@ class PublicInterface(QWidget):
         qr_data = qr_scanner.scan_frame(frame)
         
         if qr_data:
+            # Play scan sound
+            self.play_sound("scan")
+            
             # Draw detection box
             cv2.putText(frame, "QR DETECTE", (50, 50), 
                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
@@ -631,10 +658,12 @@ class PublicInterface(QWidget):
         employee = self.db.get_employee_by_qr(qr_data)
         
         if not employee:
+            self.play_sound("error")
             self.show_status("❌ Code QR non reconnu", "error", auto_clear=True)
             return
         
         if not employee.enabled:
+            self.play_sound("error")
             self.show_status(f"❌ {employee.name}\nCompte désactivé", "error", auto_clear=True)
             return
         
@@ -647,6 +676,9 @@ class PublicInterface(QWidget):
 
     def handle_successful_face_recognition(self, employee, confidence, frame):
         """Handle successful face recognition"""
+        # Play scan sound
+        self.play_sound("scan")
+        
         # Draw success indicators on frame
         # Note: Since we don't have face coordinates from the embedding approach,
         # we'll just show the result without drawing rectangles
@@ -666,10 +698,12 @@ class PublicInterface(QWidget):
         employee = self.db.get_employee(employee_id)
         
         if not employee:
+            self.play_sound("error")
             self.show_status("❌ Employé non trouvé", "error", auto_clear=True)
             return
         
         if not employee.enabled:
+            self.play_sound("error")
             self.show_status(f"❌ {employee.name}\nCompte désactivé", "error", auto_clear=True)
             return
         
@@ -691,10 +725,12 @@ class PublicInterface(QWidget):
         employee = self.db.get_employee(employee_id)
         
         if not employee:
+            self.play_sound("error")
             self.show_status("❌ ID employé non trouvé", "error", auto_clear=True)
             return
         
         if not employee.enabled:
+            self.play_sound("error")
             self.show_status(f"❌ {employee.name}\nCompte désactivé", "error", auto_clear=True)
             return
         
@@ -746,14 +782,22 @@ class PublicInterface(QWidget):
             action = "OUT"
             window_name = "DÉPART"
         else:
+            self.play_sound("error")
             self.show_status("❌ Hors fenêtre horaire", "error", auto_clear=True)
             return
 
         # Check for duplicate
         is_duplicate, dup_message = self.check_duplicate_attendance(employee.employee_id, action)
         if is_duplicate:
+            self.play_sound("error")
             self.show_status(f"❌ {employee.name}\n{dup_message}", "error", auto_clear=True)
             return
+
+        # Play success sound based on action
+        if action == "IN":
+            self.play_sound("in")
+        elif action == "OUT":
+            self.play_sound("out")
 
         # Save checkpoint photo
         photo_path = self.save_checkpoint_photo(employee.employee_id, action, frame)
